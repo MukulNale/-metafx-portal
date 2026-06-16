@@ -68,7 +68,7 @@ export default function DashboardPage() {
 
 function MyTasks({ allTasks }: { allTasks: SubTask[] }) {
   const { user } = useAuth();
-  const mine = allTasks.filter(t => t.assignee === user?.name).slice(0, 6);
+  const mine = allTasks.filter(t => t.assignees?.includes(user?.name ?? "")).slice(0, 6);
   if (!mine.length) return <p className="text-sm text-slate-500">No tasks assigned to you yet.</p>;
   return (
     <div className="space-y-0.5">

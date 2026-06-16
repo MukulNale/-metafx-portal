@@ -35,7 +35,7 @@ export default function AdminPage() {
               </thead>
               <tbody>
                 {USERS.map(u => {
-                  const mine = allTasks.filter(t => t.assignee === u.name);
+                  const mine = allTasks.filter(t => t.assignees?.includes(u.name));
                   const done = mine.filter(t => t.status === "done").length;
                   return (
                     <tr key={u.id} className="border-b border-slate-800/50 last:border-0 hover:bg-slate-800/30">

@@ -35,7 +35,7 @@ export default function TasksPage() {
   );
 
   const filtered = allTasks.filter(t => {
-    if (filter === "mine" && t.assignee !== user?.name) return false;
+    if (filter === "mine" && !t.assignees?.includes(user?.name ?? "")) return false;
     if (statusFilter !== "all" && t.status !== statusFilter) return false;
     return true;
   });
@@ -92,11 +92,13 @@ export default function TasksPage() {
                     <td className="px-5 py-3 text-[13px] font-medium text-slate-200">{t.title}</td>
                     <td className="px-3 py-3 text-[12px] text-slate-500">{t.phase}</td>
                     <td className="px-3 py-3">
-                      <div className="flex items-center gap-1.5">
-                        <div className={`w-5 h-5 rounded-full bg-gradient-to-br ${MEMBER_COLOR[t.assignee] ?? "from-slate-600 to-slate-700"} flex items-center justify-center text-white text-[8px] font-bold`}>
-                          {t.assignee[0]}
-                        </div>
-                        <span className="text-[12px] text-slate-400">{t.assignee}</span>
+                      <div className="flex items-center gap-1">
+                        {(t.assignees ?? []).map(name => (
+                          <div key={name} className={`w-5 h-5 rounded-full bg-gradient-to-br ${MEMBER_COLOR[name] ?? "from-slate-600 to-slate-700"} flex items-center justify-center text-white text-[8px] font-bold`} title={name}>
+                            {name[0]}
+                          </div>
+                        ))}
+                        {(t.assignees ?? []).length > 0 && <span className="text-[12px] text-slate-400 ml-1">{(t.assignees ?? []).join(", ")}</span>}
                       </div>
                     </td>
                     <td className="px-3 py-3">
