@@ -1,8 +1,8 @@
 "use client";
-import { use, useState } from "react";
+import { use, useState, useRef } from "react";
 import AuthGuard from "@/components/AuthGuard";
 import Header from "@/components/layout/Header";
-import { PROJECTS, type SubTask, type Status } from "@/lib/projects";
+import { PROJECTS, type SubTask, type Status, type Task } from "@/lib/projects";
 import { USERS } from "@/lib/users";
 
 const STATUS_OPTIONS: Status[] = ["todo", "in-progress", "review", "done"];
@@ -32,9 +32,14 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
   const [, forceUpdate] = useState(0);
   const refresh = () => forceUpdate(n => n + 1);
 
-  const [showAdd, setShowAdd]   = useState<string | null>(null);
-  const [newTask, setNewTask]   = useState({ ...BLANK_TASK });
-  const [editTask, setEditTask] = useState<{ phaseId: string; task: SubTask } | null>(null);
+  const [showAdd, setShowAdd]               = useState<string | null>(null);
+  const [newTask, setNewTask]               = useState({ ...BLANK_TASK });
+  const [editTask, setEditTask]             = useState<{ sectionId: string; task: SubTask } | null>(null);
+  const [editingSection, setEditingSection] = useState<string | null>(null);
+  const [sectionTitle, setSectionTitle]     = useState("");
+  const sectionInputRef                     = useRef<HTMLInputElement>(null);
+  const [editingProjectName, setEditingProjectName] = useState(false);
+  const [projectNameDraft, setProjectNameDraft]     = useState("");
 
   if (!project) return <div className="p-8 text-slate-400">Project not found.</div>;
 
@@ -42,47 +47,64 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
   const done = allSubtasks.filter(t => t.status === "done").length;
   const pct  = allSubtasks.length ? Math.round((done / allSubtasks.length) * 100) : 0;
 
-  function addTask(phaseId: string) {
+  // ── Section helpers ──
+  function startEditSection(section: Task) {
+    setEditingSection(section.id);
+    setSectionTitle(section.title);
+    setTimeout(() => sectionInputRef.current?.focus(), 50);
+  }
+  function saveSection(sectionId: string) {
+    const s = project!.tasks.find(t => t.id === sectionId);
+    if (s && sectionTitle.trim()) s.title = sectionTitle.trim();
+    setEditingSection(null);
+    refresh();
+  }
+  function deleteSection(sectionId: string) {
+    project!.tasks = project!.tasks.filter(t => t.id !== sectionId);
+    refresh();
+  }
+  function addSection() {
+    const newSection: Task = { id: `section-${Date.now()}`, title: "New Section", subtasks: [] };
+    project!.tasks.push(newSection);
+    refresh();
+    setTimeout(() => {
+      setEditingSection(newSection.id);
+      setSectionTitle(newSection.title);
+      setTimeout(() => sectionInputRef.current?.focus(), 50);
+    }, 30);
+  }
+
+  // ── Subtask helpers ──
+  function addTask(sectionId: string) {
     if (!newTask.title.trim() || !newTask.assignee) return;
-    const phase = project!.tasks.find(t => t.id === phaseId);
-    if (!phase) return;
-    phase.subtasks.push({
-      id: `st-${Date.now()}`,
-      title: newTask.title,
-      assignee: newTask.assignee,
-      status: "todo",
-      priority: newTask.priority as "high" | "medium" | "low",
-      due: newTask.due || undefined,
-    });
+    const section = project!.tasks.find(t => t.id === sectionId);
+    if (!section) return;
+    section.subtasks.push({ id: `st-${Date.now()}`, title: newTask.title, assignee: newTask.assignee, status: "todo", priority: newTask.priority as "high"|"medium"|"low", due: newTask.due || undefined });
     setNewTask({ ...BLANK_TASK });
     setShowAdd(null);
     refresh();
   }
-
-  function deleteTask(phaseId: string, taskId: string) {
-    const phase = project!.tasks.find(t => t.id === phaseId);
-    if (!phase) return;
-    phase.subtasks = phase.subtasks.filter(s => s.id !== taskId);
+  function deleteTask(sectionId: string, taskId: string) {
+    const section = project!.tasks.find(t => t.id === sectionId);
+    if (!section) return;
+    section.subtasks = section.subtasks.filter(s => s.id !== taskId);
     refresh();
   }
-
   function saveEdit() {
     if (!editTask) return;
-    const phase = project!.tasks.find(t => t.id === editTask.phaseId);
-    if (!phase) return;
-    const idx = phase.subtasks.findIndex(s => s.id === editTask.task.id);
-    if (idx !== -1) phase.subtasks[idx] = { ...editTask.task };
+    const section = project!.tasks.find(t => t.id === editTask.sectionId);
+    if (!section) return;
+    const idx = section.subtasks.findIndex(s => s.id === editTask.task.id);
+    if (idx !== -1) section.subtasks[idx] = { ...editTask.task };
     setEditTask(null);
     refresh();
   }
-
-  function cycleStatus(phaseId: string, sub: SubTask) {
-    const phase = project!.tasks.find(t => t.id === phaseId);
-    if (!phase) return;
-    const idx = phase.subtasks.findIndex(s => s.id === sub.id);
+  function cycleStatus(sectionId: string, sub: SubTask) {
+    const section = project!.tasks.find(t => t.id === sectionId);
+    if (!section) return;
+    const idx = section.subtasks.findIndex(s => s.id === sub.id);
     if (idx === -1) return;
-    const next = STATUS_OPTIONS[(STATUS_OPTIONS.indexOf(sub.status) + 1) % STATUS_OPTIONS.length];
-    phase.subtasks[idx].status = next;
+    section.subtasks[idx].status = STATUS_OPTIONS[(STATUS_OPTIONS.indexOf(sub.status) + 1) % STATUS_OPTIONS.length];
     refresh();
   }
 
@@ -95,8 +117,22 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
         <div className="bg-slate-900 border border-slate-800 rounded-xl p-5">
           <div className="flex items-start justify-between gap-4">
             <div className="flex-1">
-              <h2 className="text-lg font-bold text-white mb-1">{project.name}</h2>
-              <p className="text-sm text-slate-400">{project.description}</p>
+              {editingProjectName ? (
+                <input autoFocus value={projectNameDraft}
+                  onChange={e => setProjectNameDraft(e.target.value)}
+                  onBlur={() => { if (projectNameDraft.trim()) project.name = projectNameDraft.trim(); setEditingProjectName(false); refresh(); }}
+                  onKeyDown={e => { if (e.key === "Enter") { if (projectNameDraft.trim()) project.name = projectNameDraft.trim(); setEditingProjectName(false); refresh(); } if (e.key === "Escape") setEditingProjectName(false); }}
+                  className="text-lg font-bold text-white bg-slate-800 border border-indigo-500 rounded-lg px-2 py-0.5 outline-none w-full max-w-xs" />
+              ) : (
+                <div className="flex items-center gap-2 group">
+                  <h2 className="text-lg font-bold text-white">{project.name}</h2>
+                  <button onClick={() => { setProjectNameDraft(project.name); setEditingProjectName(true); }}
+                    className="opacity-0 group-hover:opacity-100 p-1 rounded text-slate-600 hover:text-indigo-400 transition-opacity cursor-pointer">
+                    <svg width="12" height="12" viewBox="0 0 20 20" fill="none"><path d="M14.5 3.5l2 2L6 16H4v-2L14.5 3.5z" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
+                  </button>
+                </div>
+              )}
+              <p className="text-sm text-slate-400 mt-1">{project.description}</p>
             </div>
             <div className="text-right flex-shrink-0">
               <div className="text-2xl font-bold text-indigo-400">{pct}%</div>
@@ -115,28 +151,43 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
           </div>
         </div>
 
-        {/* Phases */}
-        {project.tasks.map(phase => (
-          <div key={phase.id} className="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden">
-            <div className="flex items-center justify-between px-5 py-3 border-b border-slate-800 bg-slate-800/50">
-              <div>
-                <span className="text-[11px] font-semibold text-indigo-400 uppercase tracking-wide mr-2">{phase.phase}</span>
-                <span className="font-semibold text-slate-200">{phase.title}</span>
-              </div>
-              <div className="flex items-center gap-3">
-                <span className="text-xs text-slate-500">{phase.subtasks.filter(s => s.status === "done").length}/{phase.subtasks.length} done</span>
-                <button onClick={() => { setShowAdd(showAdd === phase.id ? null : phase.id); setNewTask({ ...BLANK_TASK }); }}
+        {/* Sections */}
+        {project.tasks.map(section => (
+          <div key={section.id} className="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden">
+            <div className="flex items-center gap-2 px-5 py-3 border-b border-slate-800 bg-slate-800/50">
+              {editingSection === section.id ? (
+                <input ref={sectionInputRef} value={sectionTitle}
+                  onChange={e => setSectionTitle(e.target.value)}
+                  onBlur={() => saveSection(section.id)}
+                  onKeyDown={e => { if (e.key === "Enter") saveSection(section.id); if (e.key === "Escape") setEditingSection(null); }}
+                  className="flex-1 font-semibold text-white bg-slate-800 border border-indigo-500 rounded-lg px-2 py-0.5 text-sm outline-none" />
+              ) : (
+                <div className="flex items-center gap-1.5 flex-1 min-w-0 group">
+                  <span className="font-semibold text-slate-200">{section.title}</span>
+                  <button onClick={() => startEditSection(section)}
+                    className="opacity-0 group-hover:opacity-100 p-1 rounded text-slate-600 hover:text-indigo-400 transition-opacity cursor-pointer flex-shrink-0" title="Rename">
+                    <svg width="11" height="11" viewBox="0 0 20 20" fill="none"><path d="M14.5 3.5l2 2L6 16H4v-2L14.5 3.5z" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
+                  </button>
+                </div>
+              )}
+              <div className="flex items-center gap-3 flex-shrink-0 ml-auto">
+                <span className="text-xs text-slate-500">{section.subtasks.filter(s => s.status === "done").length}/{section.subtasks.length} done</span>
+                <button onClick={() => { setShowAdd(showAdd === section.id ? null : section.id); setNewTask({ ...BLANK_TASK }); }}
                   className="flex items-center gap-1 text-xs font-medium text-indigo-400 hover:text-indigo-300 cursor-pointer">
                   <svg width="12" height="12" viewBox="0 0 20 20" fill="none"><path d="M10 4v12M4 10h12" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg>
                   Add task
                 </button>
+                <button onClick={() => deleteSection(section.id)}
+                  className="p-1 rounded text-slate-700 hover:text-red-400 hover:bg-red-500/10 cursor-pointer transition-colors" title="Delete section">
+                  <svg width="12" height="12" viewBox="0 0 20 20" fill="none"><path d="M4 6h12M8 6V4h4v2M7 6v10h6V6H7z" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
+                </button>
               </div>
             </div>
 
-            {/* Add task form */}
-            {showAdd === phase.id && (
+            {showAdd === section.id && (
               <div className="px-5 py-3 bg-indigo-500/5 border-b border-slate-800 flex flex-wrap gap-2 items-end">
                 <input value={newTask.title} onChange={e => setNewTask({...newTask, title: e.target.value})}
+                  onKeyDown={e => e.key === "Enter" && addTask(section.id)}
                   placeholder="Task title" className="flex-1 min-w-[180px] px-3 py-1.5 text-sm bg-slate-800 border border-slate-700 rounded-lg text-white placeholder:text-slate-600 outline-none focus:border-indigo-500" />
                 <select value={newTask.assignee} onChange={e => setNewTask({...newTask, assignee: e.target.value})}
                   className="px-3 py-1.5 text-sm bg-slate-800 border border-slate-700 rounded-lg text-white outline-none focus:border-indigo-500">
@@ -151,15 +202,14 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
                 </select>
                 <input type="date" value={newTask.due} onChange={e => setNewTask({...newTask, due: e.target.value})}
                   className="px-3 py-1.5 text-sm bg-slate-800 border border-slate-700 rounded-lg text-white outline-none focus:border-indigo-500" />
-                <button onClick={() => addTask(phase.id)}
+                <button onClick={() => addTask(section.id)}
                   className="px-4 py-1.5 rounded-lg text-white text-sm font-medium cursor-pointer"
                   style={{ background: "linear-gradient(135deg,#6366f1,#4f46e5)" }}>Add</button>
                 <button onClick={() => setShowAdd(null)} className="px-3 py-1.5 text-sm text-slate-500 hover:text-slate-300 cursor-pointer">Cancel</button>
               </div>
             )}
 
-            {/* Task table */}
-            {phase.subtasks.length === 0 ? (
+            {section.subtasks.length === 0 ? (
               <div className="px-5 py-6 text-sm text-slate-600 text-center">No tasks yet — click &quot;Add task&quot; to get started.</div>
             ) : (
               <table className="w-full">
@@ -174,7 +224,7 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
                   </tr>
                 </thead>
                 <tbody>
-                  {phase.subtasks.map(sub => (
+                  {section.subtasks.map(sub => (
                     <tr key={sub.id} className="border-b border-slate-800/50 last:border-0 hover:bg-slate-800/30 transition-colors group">
                       <td className="px-5 py-3 text-[13px] font-medium text-slate-200">{sub.title}</td>
                       <td className="px-3 py-3">
@@ -186,7 +236,7 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
                         </div>
                       </td>
                       <td className="px-3 py-3">
-                        <button onClick={() => cycleStatus(phase.id, sub)}
+                        <button onClick={() => cycleStatus(section.id, sub)}
                           className={`text-[11px] font-semibold px-2 py-0.5 rounded cursor-pointer hover:opacity-80 transition-opacity ${STATUS_STYLE[sub.status]}`}>
                           {STATUS_LABEL[sub.status]}
                         </button>
@@ -197,14 +247,12 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
                       <td className="px-3 py-3 text-[12px] text-slate-500">{sub.due ?? "—"}</td>
                       <td className="px-3 py-3">
                         <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                          <button onClick={() => setEditTask({ phaseId: phase.id, task: { ...sub } })}
-                            className="p-1 rounded text-slate-500 hover:text-indigo-400 hover:bg-indigo-500/10 cursor-pointer transition-colors"
-                            title="Edit">
+                          <button onClick={() => setEditTask({ sectionId: section.id, task: { ...sub } })}
+                            className="p-1 rounded text-slate-500 hover:text-indigo-400 hover:bg-indigo-500/10 cursor-pointer transition-colors" title="Edit">
                             <svg width="13" height="13" viewBox="0 0 20 20" fill="none"><path d="M14.5 3.5l2 2L6 16H4v-2L14.5 3.5z" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
                           </button>
-                          <button onClick={() => deleteTask(phase.id, sub.id)}
-                            className="p-1 rounded text-slate-500 hover:text-red-400 hover:bg-red-500/10 cursor-pointer transition-colors"
-                            title="Delete">
+                          <button onClick={() => deleteTask(section.id, sub.id)}
+                            className="p-1 rounded text-slate-500 hover:text-red-400 hover:bg-red-500/10 cursor-pointer transition-colors" title="Delete">
                             <svg width="13" height="13" viewBox="0 0 20 20" fill="none"><path d="M4 6h12M8 6V4h4v2M7 6v10h6V6H7z" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
                           </button>
                         </div>
@@ -216,9 +264,14 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
             )}
           </div>
         ))}
+
+        <button onClick={addSection}
+          className="flex items-center gap-2 px-4 py-2.5 rounded-xl border border-dashed border-slate-700 text-sm text-slate-500 hover:text-slate-300 hover:border-slate-500 transition-colors w-full cursor-pointer">
+          <svg width="14" height="14" viewBox="0 0 20 20" fill="none"><path d="M10 4v12M4 10h12" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg>
+          Add section
+        </button>
       </div>
 
-      {/* Edit Task Modal */}
       {editTask && (
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
           <div className="bg-slate-900 border border-slate-700 rounded-xl p-6 w-full max-w-md">
@@ -263,13 +316,9 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
             <div className="flex gap-2 mt-5">
               <button onClick={saveEdit}
                 className="flex-1 py-2 rounded-lg text-white text-sm font-medium cursor-pointer"
-                style={{ background: "linear-gradient(135deg,#6366f1,#4f46e5)" }}>
-                Save Changes
-              </button>
+                style={{ background: "linear-gradient(135deg,#6366f1,#4f46e5)" }}>Save Changes</button>
               <button onClick={() => setEditTask(null)}
-                className="px-4 py-2 rounded-lg text-sm text-slate-400 hover:text-slate-200 bg-slate-800 cursor-pointer">
-                Cancel
-              </button>
+                className="px-4 py-2 rounded-lg text-sm text-slate-400 hover:text-slate-200 bg-slate-800 cursor-pointer">Cancel</button>
             </div>
           </div>
         </div>

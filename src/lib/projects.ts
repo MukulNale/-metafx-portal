@@ -13,7 +13,6 @@ export interface SubTask {
 export interface Task {
   id: string;
   title: string;
-  phase: string;
   subtasks: SubTask[];
 }
 
@@ -45,7 +44,6 @@ export const PROJECTS: Project[] = [
       {
         id: "pre-production",
         title: "Pre-Production",
-        phase: "Phase 1",
         subtasks: [
           { id: "pp-1", title: "Location Generations",   assignee: "Rohan",  status: "todo", priority: "high",   due: "Jul 10" },
           { id: "pp-2", title: "Character Sheets",       assignee: "Anjali", status: "todo", priority: "high",   due: "Jul 15" },
@@ -58,7 +56,6 @@ export const PROJECTS: Project[] = [
       {
         id: "production",
         title: "Production",
-        phase: "Phase 2",
         subtasks: [
           { id: "pr-1", title: "AI Scene Generation — Act 1", assignee: "Rohan",  status: "todo", priority: "high",   due: "Aug 10" },
           { id: "pr-2", title: "AI Scene Generation — Act 2", assignee: "Rohan",  status: "todo", priority: "high",   due: "Sep 1"  },
