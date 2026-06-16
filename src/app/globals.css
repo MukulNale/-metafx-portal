@@ -1,0 +1,12 @@
+@import "tailwindcss";
+
+* { box-sizing: border-box; }
+
+.scrollbar-thin::-webkit-scrollbar { width: 5px; }
+.scrollbar-thin::-webkit-scrollbar-track { background: transparent; }
+.scrollbar-thin::-webkit-scrollbar-thumb { background: #e2e8f0; border-radius: 99px; }
+
+@keyframes progress-grow {
+  from { width: 0; }
+}
+.animate-progress { animation: progress-grow 0.8s ease forwards; }
