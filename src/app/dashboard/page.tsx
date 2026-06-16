@@ -1,33 +1,32 @@
 "use client";
 import AuthGuard from "@/components/AuthGuard";
 import Header from "@/components/layout/Header";
-import { PROJECTS } from "@/lib/projects";
+import { PROJECTS, type SubTask } from "@/lib/projects";
+import { useAuth } from "@/lib/auth";
 import Link from "next/link";
 
 export default function DashboardPage() {
   const proj = PROJECTS[0];
   const allTasks = proj.tasks.flatMap(t => t.subtasks);
-  const done      = allTasks.filter(t => t.status === "done").length;
-  const inProg    = allTasks.filter(t => t.status === "in-progress").length;
-  const todo      = allTasks.filter(t => t.status === "todo").length;
-  const review    = allTasks.filter(t => t.status === "review").length;
-  const total     = allTasks.length;
-  const progress  = Math.round((done / total) * 100);
+  const done    = allTasks.filter(t => t.status === "done").length;
+  const inProg  = allTasks.filter(t => t.status === "in-progress").length;
+  const todo    = allTasks.filter(t => t.status === "todo").length;
+  const review  = allTasks.filter(t => t.status === "review").length;
+  const total   = allTasks.length;
+  const progress = Math.round((done / total) * 100);
 
   return (
     <AuthGuard>
       <Header title="Dashboard" />
       <div className="flex-1 overflow-y-auto scrollbar-thin p-6 space-y-5">
 
-        {/* Welcome + quick stats */}
         <div className="grid grid-cols-4 gap-4">
-          <StatCard label="Total Tasks"   value={total}  color="bg-indigo-50 text-indigo-600" />
-          <StatCard label="In Progress"   value={inProg} color="bg-amber-50 text-amber-600"   />
-          <StatCard label="In Review"     value={review} color="bg-blue-50 text-blue-600"      />
-          <StatCard label="Completed"     value={done}   color="bg-green-50 text-green-600"    />
+          <StatCard label="Total Tasks"  value={total}  color="text-indigo-600" />
+          <StatCard label="In Progress"  value={inProg} color="text-amber-600"  />
+          <StatCard label="In Review"    value={review} color="text-blue-600"   />
+          <StatCard label="Completed"    value={done}   color="text-green-600"  />
         </div>
 
-        {/* Active Project */}
         <div className="bg-white border border-slate-200 rounded-xl p-5">
           <div className="flex items-center justify-between mb-4">
             <div>
@@ -52,7 +51,6 @@ export default function DashboardPage() {
           </div>
         </div>
 
-        {/* My tasks */}
         <div className="bg-white border border-slate-200 rounded-xl p-5">
           <div className="flex items-center justify-between mb-3">
             <h2 className="font-semibold text-slate-800">My Tasks</h2>
@@ -66,8 +64,7 @@ export default function DashboardPage() {
   );
 }
 
-function MyTasks({ allTasks }: { allTasks: ReturnType<typeof PROJECTS>[0]["tasks"][0]["subtasks"] }) {
-  const { useAuth } = require("@/lib/auth");
+function MyTasks({ allTasks }: { allTasks: SubTask[] }) {
   const { user } = useAuth();
   const mine = allTasks.filter(t => t.assignee === user?.name).slice(0, 6);
   if (!mine.length) return <p className="text-sm text-slate-400">No tasks assigned to you yet.</p>;
@@ -91,7 +88,7 @@ function StatCard({ label, value, color }: { label: string; value: number; color
   return (
     <div className="bg-white border border-slate-200 rounded-xl p-5">
       <div className="text-[13px] text-slate-500 mb-1">{label}</div>
-      <div className={`text-3xl font-bold ${color.split(" ")[1]}`}>{value}</div>
+      <div className={`text-3xl font-bold ${color}`}>{value}</div>
     </div>
   );
 }
