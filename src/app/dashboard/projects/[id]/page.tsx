@@ -61,7 +61,7 @@ function AssigneePicker({ value, onChange }: { value: string[]; onChange: (v: st
         <svg className="ml-auto flex-shrink-0" width="10" height="10" viewBox="0 0 20 20" fill="none"><path d="M5 7l5 5 5-5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg>
       </button>
       {open && (
-        <div className="absolute top-full left-0 mt-1 bg-slate-800 border border-slate-700 rounded-xl shadow-xl z-20 min-w-[160px] py-1">
+        <div className="absolute top-full left-0 mt-1 bg-slate-800 border border-slate-700 rounded-xl shadow-xl z-50 min-w-[160px] py-1 max-h-60 overflow-y-auto">
           {USERS.map(u => (
             <label key={u.id} className="flex items-center gap-2.5 px-3 py-2 cursor-pointer hover:bg-slate-700/50 transition-colors">
               <input type="checkbox" checked={value.includes(u.name)} onChange={() => toggle(u.name)}

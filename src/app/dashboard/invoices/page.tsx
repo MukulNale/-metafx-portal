@@ -90,6 +90,68 @@ export default function InvoicesPage() {
     if (selected?.id === id) setSelected(null);
   }
 
+  function downloadPDF(inv: Invoice) {
+    const lineRows = inv.items.map(it => `
+      <tr>
+        <td style="padding:10px 8px;border-bottom:1px solid #e5e7eb;">${it.description || "—"}</td>
+        <td style="padding:10px 8px;border-bottom:1px solid #e5e7eb;text-align:center;">${it.qty}</td>
+        <td style="padding:10px 8px;border-bottom:1px solid #e5e7eb;text-align:right;">₹${it.rate.toLocaleString("en-IN")}</td>
+        <td style="padding:10px 8px;border-bottom:1px solid #e5e7eb;text-align:right;font-weight:600;">₹${(it.qty * it.rate).toLocaleString("en-IN", { minimumFractionDigits: 2 })}</td>
+      </tr>`).join("");
+
+    const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${inv.number}</title>
+    <style>
+      body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; color: #111; margin: 0; padding: 40px; }
+      .header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 40px; border-bottom: 2px solid #6366f1; padding-bottom: 24px; }
+      .brand { font-size: 28px; font-weight: 800; color: #6366f1; }
+      .inv-meta { text-align: right; }
+      .inv-num { font-size: 20px; font-weight: 700; color: #111; }
+      .badge { display: inline-block; padding: 3px 12px; border-radius: 999px; font-size: 11px; font-weight: 600; text-transform: uppercase; background: ${inv.status === "paid" ? "#d1fae5" : inv.status === "sent" ? "#dbeafe" : "#f1f5f9"}; color: ${inv.status === "paid" ? "#065f46" : inv.status === "sent" ? "#1e40af" : "#475569"}; margin-top: 4px; }
+      .parties { display: flex; justify-content: space-between; margin-bottom: 32px; }
+      .party-block label { font-size: 11px; text-transform: uppercase; color: #6b7280; letter-spacing: .05em; }
+      .party-block p { margin: 4px 0 0; font-weight: 600; font-size: 15px; }
+      .party-block span { color: #6b7280; font-size: 13px; }
+      table { width: 100%; border-collapse: collapse; }
+      th { background: #f8fafc; padding: 10px 8px; text-align: left; font-size: 11px; text-transform: uppercase; color: #6b7280; letter-spacing: .05em; border-bottom: 2px solid #e5e7eb; }
+      th:nth-child(2) { text-align: center; }
+      th:nth-child(3), th:nth-child(4) { text-align: right; }
+      .total-row { display: flex; justify-content: flex-end; margin-top: 16px; }
+      .total-box { background: #f8fafc; border-radius: 8px; padding: 16px 24px; text-align: right; }
+      .total-label { font-size: 12px; color: #6b7280; margin-bottom: 4px; }
+      .total-amt { font-size: 26px; font-weight: 800; color: #6366f1; }
+      .notes { margin-top: 32px; padding: 16px; background: #f8fafc; border-radius: 8px; }
+      .notes label { font-size: 11px; text-transform: uppercase; color: #6b7280; letter-spacing: .05em; }
+      .notes p { margin: 6px 0 0; font-size: 13px; color: #374151; white-space: pre-wrap; }
+      .footer { margin-top: 48px; text-align: center; font-size: 11px; color: #9ca3af; border-top: 1px solid #e5e7eb; padding-top: 16px; }
+      @media print { body { padding: 20px; } }
+    </style></head><body>
+    <div class="header">
+      <div class="brand">Meta<span style="color:#111">FX</span></div>
+      <div class="inv-meta">
+        <div class="inv-num">${inv.number}</div>
+        <div class="badge">${inv.status}</div>
+        <div style="font-size:12px;color:#6b7280;margin-top:6px;">Date: ${inv.createdAt}${inv.dueDate ? `<br>Due: ${inv.dueDate}` : ""}</div>
+      </div>
+    </div>
+    <div class="parties">
+      <div class="party-block"><label>Bill To</label><p>${inv.clientName}</p>${inv.clientEmail ? `<span>${inv.clientEmail}</span>` : ""}</div>
+      <div class="party-block" style="text-align:right"><label>From</label><p>MetaFX</p></div>
+    </div>
+    <table><thead><tr><th>Description</th><th>Qty</th><th>Rate</th><th>Amount</th></tr></thead>
+    <tbody>${lineRows}</tbody></table>
+    <div class="total-row"><div class="total-box"><div class="total-label">Total Amount</div><div class="total-amt">${fmt(total(inv.items))}</div></div></div>
+    ${inv.notes ? `<div class="notes"><label>Notes</label><p>${inv.notes}</p></div>` : ""}
+    <div class="footer">Thank you for your business · MetaFX</div>
+    </body></html>`;
+
+    const win = window.open("", "_blank");
+    if (!win) return;
+    win.document.write(html);
+    win.document.close();
+    win.focus();
+    setTimeout(() => { win.print(); }, 500);
+  }
+
   function sendEmail(inv: Invoice) {
     const lineItems = inv.items.map(it => `  • ${it.description} × ${it.qty} @ ₹${it.rate} = ₹${it.qty * it.rate}`).join("\n");
     const body = `Dear ${inv.clientName},\n\nPlease find below your invoice details:\n\nInvoice No: ${inv.number}\nDue Date: ${inv.dueDate || "N/A"}\n\nItems:\n${lineItems}\n\nTotal: ${fmt(total(inv.items))}\n${inv.notes ? `\nNotes: ${inv.notes}` : ""}\n\nThank you for your business.\n\nMetaFX`;
@@ -221,7 +283,12 @@ export default function InvoicesPage() {
                   </div>
                   <div className="text-slate-400 text-sm">Created by {inv.createdBy} · {inv.createdAt}</div>
                 </div>
-                <div className="flex gap-2">
+                <div className="flex gap-2 flex-wrap">
+                  <button onClick={() => downloadPDF(inv)}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-slate-800 text-slate-300 border border-slate-700 hover:bg-slate-700 cursor-pointer">
+                    <svg width="13" height="13" viewBox="0 0 20 20" fill="none"><path d="M10 3v10M6 9l4 4 4-4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/><path d="M3 15h14" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg>
+                    Download PDF
+                  </button>
                   {inv.status !== "paid" && (
                     <button onClick={() => sendEmail(inv)}
                       className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-white cursor-pointer"
