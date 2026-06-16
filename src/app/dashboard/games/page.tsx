@@ -4,22 +4,27 @@ import AuthGuard from "@/components/AuthGuard";
 import Header from "@/components/layout/Header";
 import { useAuth } from "@/lib/auth";
 
-// ─── Score storage ────────────────────────────────────────────────────────────
-const SCORE_KEY = "mfx_scores_v1";
+// ─── Score API ────────────────────────────────────────────────────────────────
 type ScoreEntry = { player: string; value: number; date: string };
 type ScoreBoard = { snake: ScoreEntry[]; memory: ScoreEntry[]; wordle: ScoreEntry[]; trivia: ScoreEntry[] };
 
-function loadScores(): ScoreBoard {
-  try { return { snake: [], memory: [], wordle: [], trivia: [], ...JSON.parse(localStorage.getItem(SCORE_KEY) ?? "{}") }; }
-  catch { return { snake: [], memory: [], wordle: [], trivia: [] }; }
+async function addScore(game: keyof ScoreBoard, entry: ScoreEntry) {
+  try {
+    await fetch("/api/data/scores", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ game, entry }),
+    });
+  } catch { /* silent */ }
 }
-function addScore(game: keyof ScoreBoard, entry: ScoreEntry) {
-  const all = loadScores();
-  const isLowBetter = game === "memory" || game === "wordle";
-  all[game] = [...all[game], entry]
-    .sort((a, b) => isLowBetter ? a.value - b.value : b.value - a.value)
-    .slice(0, 10);
-  localStorage.setItem(SCORE_KEY, JSON.stringify(all));
+
+async function fetchScores(): Promise<ScoreBoard> {
+  try {
+    const r = await fetch("/api/data/scores", { cache: "no-store" });
+    return await r.json();
+  } catch {
+    return { snake: [], memory: [], wordle: [], trivia: [] };
+  }
 }
 
 // ─── Snake ────────────────────────────────────────────────────────────────────
@@ -138,6 +143,7 @@ function MemoryGame({ playerName }: { playerName: string }) {
 const WORDS = ["SCENE", "LIGHT", "FRAME", "SHOOT", "DRAFT", "SOUND", "SCORE", "STORY", "ACTOR", "STAGE", "DANCE", "TEMPO", "LYRIC", "PITCH", "BEATS", "AUDIO", "PRINT", "FOCUS", "ANGLE", "PAINT", "BRUSH", "MOVIE", "PIXEL", "BLOOM", "TRACK", "CABLE", "PRISM", "BOKEH", "CRANE", "SLATE"];
 const pickWord = () => WORDS[Math.floor(Math.random() * WORDS.length)];
 type TileState = "empty" | "typing" | "correct" | "present" | "absent";
+const MAX_HINTS = 3;
 
 function WordleGame({ playerName }: { playerName: string }) {
   const [target, setTarget] = useState(pickWord);
@@ -145,44 +151,62 @@ function WordleGame({ playerName }: { playerName: string }) {
   const [current, setCurrent] = useState("");
   const [done, setDone] = useState<"win" | "lose" | null>(null);
   const [shake, setShake] = useState(false);
+  // hints: set of position indices already revealed
+  const [hintedPositions, setHintedPositions] = useState<Set<number>>(new Set());
+  const [hintsUsed, setHintsUsed] = useState(0);
   const MAX = 6;
+
+  const submitGuess = useCallback((guess: string) => {
+    if (guess.length !== 5) { setShake(true); setTimeout(() => setShake(false), 500); return; }
+    const next = [...guesses, guess];
+    setGuesses(next);
+    if (guess === target) {
+      setDone("win");
+      addScore("wordle", { player: playerName, value: next.length, date: new Date().toISOString().split("T")[0] });
+    } else if (next.length >= MAX) {
+      setDone("lose");
+    }
+    setCurrent("");
+  }, [guesses, target, playerName]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (done) return;
       const k = e.key.toUpperCase();
-      if (k === "ENTER") {
-        if (current.length !== 5) { setShake(true); setTimeout(() => setShake(false), 500); return; }
-        const next = [...guesses, current];
-        setGuesses(next);
-        if (current === target) {
-          setDone("win");
-          addScore("wordle", { player: playerName, value: next.length, date: new Date().toISOString().split("T")[0] });
-        } else if (next.length >= MAX) {
-          setDone("lose");
-        }
-        setCurrent("");
-      } else if (k === "BACKSPACE") {
-        setCurrent(p => p.slice(0, -1));
-      } else if (/^[A-Z]$/.test(k) && current.length < 5) {
-        setCurrent(p => p + k);
-      }
+      if (k === "ENTER") { submitGuess(current); }
+      else if (k === "BACKSPACE") { setCurrent(p => p.slice(0, -1)); }
+      else if (/^[A-Z]$/.test(k) && current.length < 5) { setCurrent(p => p + k); }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [current, guesses, target, done, playerName]);
+  }, [current, done, submitGuess]);
 
-  function reset() { setTarget(pickWord()); setGuesses([]); setCurrent(""); setDone(null); }
+  function useHint() {
+    if (done || hintsUsed >= MAX_HINTS) return;
+    // Find positions not yet correctly guessed and not already hinted
+    const revealed = new Set<number>(hintedPositions);
+    // Mark positions already correctly guessed in any guess
+    for (const g of guesses) {
+      for (let i = 0; i < 5; i++) if (g[i] === target[i]) revealed.add(i);
+    }
+    // Also mark positions already in current hint set
+    for (const p of hintedPositions) revealed.add(p);
+    // Pick a random un-revealed position
+    const candidates = [0, 1, 2, 3, 4].filter(i => !revealed.has(i));
+    if (candidates.length === 0) return;
+    const pick = candidates[Math.floor(Math.random() * candidates.length)];
+    setHintedPositions(prev => new Set([...prev, pick]));
+    setHintsUsed(h => h + 1);
+  }
+
+  function reset() { setTarget(pickWord()); setGuesses([]); setCurrent(""); setDone(null); setHintedPositions(new Set()); setHintsUsed(0); }
 
   function tileStyle(row: number, col: number): { bg: string; border: string } {
     if (row < guesses.length) {
       const g = guesses[row], t = target;
-      // count occurrences
       const targetArr = t.split("");
       const state = Array(5).fill("absent");
-      // correct pass
       for (let i = 0; i < 5; i++) if (g[i] === t[i]) { state[i] = "correct"; targetArr[i] = "_"; }
-      // present pass
       for (let i = 0; i < 5; i++) {
         if (state[i] === "correct") continue;
         const idx = targetArr.indexOf(g[i]);
@@ -218,10 +242,20 @@ function WordleGame({ playerName }: { playerName: string }) {
   const kbColor = (l: string) => ({ correct: "bg-green-600 text-white", present: "bg-yellow-500 text-white", absent: "bg-slate-700 text-slate-400" })[letterState[l] ?? ""] ?? "bg-slate-700 text-slate-300";
   const ROWS = ["QWERTYUIOP", "ASDFGHJKL", "ZXCVBNM"];
 
+  // All correctly-guessed positions across all guesses + hinted positions
+  const revealedByGuesses = new Set<number>();
+  for (const g of guesses) for (let i = 0; i < 5; i++) if (g[i] === target[i]) revealedByGuesses.add(i);
+
   return (
     <div className="flex flex-col items-center gap-5">
-      <div className="flex items-center gap-4">
+      <div className="flex items-center gap-3 flex-wrap justify-center">
         <span className="text-sm text-slate-400">Guess the 5-letter word · {MAX} tries</span>
+        {!done && (
+          <button onClick={useHint} disabled={hintsUsed >= MAX_HINTS}
+            className={`px-3 py-1 rounded-lg text-xs font-medium transition-colors cursor-pointer border ${hintsUsed >= MAX_HINTS ? "bg-slate-800/40 border-slate-700 text-slate-600 cursor-not-allowed" : "bg-amber-500/10 border-amber-500/30 text-amber-400 hover:bg-amber-500/20"}`}>
+            💡 Hint ({MAX_HINTS - hintsUsed} left)
+          </button>
+        )}
         <button onClick={reset} className="px-3 py-1 rounded-lg text-xs font-medium text-white cursor-pointer" style={{ background: "linear-gradient(135deg,#6366f1,#4f46e5)" }}>New word</button>
       </div>
 
@@ -231,10 +265,21 @@ function WordleGame({ playerName }: { playerName: string }) {
           <div key={row} className="flex gap-1.5">
             {Array.from({ length: 5 }, (_, col) => {
               const { bg, border } = tileStyle(row, col);
-              const letter = row < guesses.length ? guesses[row][col] : row === guesses.length ? current[col] ?? "" : "";
+              const isCurrentRow = row === guesses.length;
+              const letter = row < guesses.length
+                ? guesses[row][col]
+                : isCurrentRow
+                  ? current[col] ?? (hintedPositions.has(col) ? target[col] : "")
+                  : "";
+              // show hint letter dimly if no current input at that position
+              const isHintLetter = isCurrentRow && hintedPositions.has(col) && !current[col];
               return (
-                <div key={col} className="w-12 h-12 rounded-lg flex items-center justify-center text-xl font-bold text-white transition-all duration-300"
-                  style={{ background: bg, border: `2px solid ${border}` }}>
+                <div key={col} className="w-12 h-12 rounded-lg flex items-center justify-center text-xl font-bold transition-all duration-300"
+                  style={{
+                    background: isHintLetter ? "rgba(234,179,8,0.15)" : bg,
+                    border: `2px solid ${isHintLetter ? "#eab308" : border}`,
+                    color: isHintLetter ? "#fbbf24" : "white",
+                  }}>
                   {letter}
                 </div>
               );
@@ -264,15 +309,7 @@ function WordleGame({ playerName }: { playerName: string }) {
             )}
           </div>
         ))}
-        <button onClick={() => {
-          if (!done && current.length === 5) {
-            const next = [...guesses, current];
-            setGuesses(next);
-            if (current === target) { setDone("win"); addScore("wordle", { player: playerName, value: next.length, date: new Date().toISOString().split("T")[0] }); }
-            else if (next.length >= MAX) setDone("lose");
-            setCurrent("");
-          } else if (!done) { setShake(true); setTimeout(() => setShake(false), 500); }
-        }} className="mt-1 px-8 h-9 rounded text-xs font-bold cursor-pointer bg-slate-700 text-slate-300 hover:bg-slate-600">ENTER</button>
+        <button onClick={() => submitGuess(current)} className="mt-1 px-8 h-9 rounded text-xs font-bold cursor-pointer bg-slate-700 text-slate-300 hover:bg-slate-600">ENTER</button>
       </div>
       <style>{`@keyframes shake { 0%,100%{transform:translateX(0)} 20%,60%{transform:translateX(-6px)} 40%,80%{transform:translateX(6px)} }`}</style>
     </div>
@@ -299,8 +336,7 @@ const QUESTIONS = [
 ];
 
 function pickQuestions(n = 8) {
-  const shuffled = [...QUESTIONS].sort(() => Math.random() - 0.5);
-  return shuffled.slice(0, n);
+  return [...QUESTIONS].sort(() => Math.random() - 0.5).slice(0, n);
 }
 
 type TriviaPhase = "setup" | "p1" | "p2" | "result";
@@ -331,12 +367,10 @@ function TriviaGame({ playerName }: { playerName: string }) {
       else setP2Answers(nextAnswers);
 
       if (qIndex + 1 >= questions.length) {
-        // done with this player
         if (phase === "p1") {
           setPhase("p2"); setQIndex(0); setSelected(null); setRevealed(false);
         } else {
-          // calc scores
-          const s1 = nextAnswers.filter((a, i) => a === questions[i].ans).length;
+          const s1 = nextAnswers.filter((a, j) => a === questions[j].ans).length;
           const s2 = [...p2Answers, i].filter((a, j) => a === questions[j].ans).length;
           addScore("trivia", { player: playerName, value: s1, date: new Date().toISOString().split("T")[0] });
           if (p2Name) addScore("trivia", { player: p2Name, value: s2, date: new Date().toISOString().split("T")[0] });
@@ -430,7 +464,14 @@ function TriviaGame({ playerName }: { playerName: string }) {
 // ─── Leaderboard ──────────────────────────────────────────────────────────────
 function Leaderboard() {
   const [scores, setScores] = useState<ScoreBoard>({ snake: [], memory: [], wordle: [], trivia: [] });
-  useEffect(() => { setScores(loadScores()); }, []);
+  const [loading, setLoading] = useState(true);
+
+  async function load() {
+    setLoading(true);
+    setScores(await fetchScores());
+    setLoading(false);
+  }
+  useEffect(() => { load(); }, []);
 
   const medals = ["🥇", "🥈", "🥉"];
   const GAMES: { key: keyof ScoreBoard; label: string; unit: string; lowBetter?: boolean }[] = [
@@ -442,30 +483,34 @@ function Leaderboard() {
 
   return (
     <div className="w-full max-w-xl mx-auto space-y-5">
-      <div className="text-center mb-2"><div className="text-2xl mb-1">🏆</div><div className="font-bold text-white">Leaderboard</div><div className="text-xs text-slate-500 mt-0.5">Scores saved on this device</div></div>
-      {GAMES.map(({ key, label, unit, lowBetter }) => {
-        const list = scores[key];
-        return (
-          <div key={key} className="bg-slate-800/50 border border-slate-700 rounded-xl overflow-hidden">
-            <div className="px-4 py-2.5 bg-slate-800 border-b border-slate-700"><span className="font-semibold text-slate-200 text-sm">{label}</span>{lowBetter && <span className="text-[10px] text-slate-500 ml-2">lower is better</span>}</div>
-            {list.length === 0 ? (
-              <div className="px-4 py-4 text-center text-slate-600 text-xs">No scores yet — play a game!</div>
-            ) : (
-              <div className="divide-y divide-slate-700/50">
-                {list.slice(0, 5).map((e, i) => (
-                  <div key={i} className="flex items-center gap-3 px-4 py-2.5">
-                    <span className="text-sm w-5 text-center">{medals[i] ?? <span className="text-slate-500 text-xs">{i + 1}</span>}</span>
-                    <span className="flex-1 text-sm font-medium text-slate-200">{e.player}</span>
-                    <span className="text-sm font-bold text-indigo-400">{e.value} <span className="text-slate-500 font-normal text-xs">{unit}</span></span>
-                    <span className="text-xs text-slate-600">{e.date}</span>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        );
-      })}
-      <button onClick={() => setScores(loadScores())} className="w-full py-2 rounded-lg text-xs text-slate-500 hover:text-slate-300 border border-slate-800 hover:border-slate-700 cursor-pointer transition-colors">↻ Refresh</button>
+      <div className="text-center mb-2"><div className="text-2xl mb-1">🏆</div><div className="font-bold text-white">Leaderboard</div><div className="text-xs text-slate-500 mt-0.5">Shared across all team members</div></div>
+      {loading ? (
+        <div className="text-center text-slate-500 text-sm py-8">Loading scores…</div>
+      ) : (
+        GAMES.map(({ key, label, unit, lowBetter }) => {
+          const list = scores[key] ?? [];
+          return (
+            <div key={key} className="bg-slate-800/50 border border-slate-700 rounded-xl overflow-hidden">
+              <div className="px-4 py-2.5 bg-slate-800 border-b border-slate-700"><span className="font-semibold text-slate-200 text-sm">{label}</span>{lowBetter && <span className="text-[10px] text-slate-500 ml-2">lower is better</span>}</div>
+              {list.length === 0 ? (
+                <div className="px-4 py-4 text-center text-slate-600 text-xs">No scores yet — play a game!</div>
+              ) : (
+                <div className="divide-y divide-slate-700/50">
+                  {list.slice(0, 5).map((e, i) => (
+                    <div key={i} className="flex items-center gap-3 px-4 py-2.5">
+                      <span className="text-sm w-5 text-center">{medals[i] ?? <span className="text-slate-500 text-xs">{i + 1}</span>}</span>
+                      <span className="flex-1 text-sm font-medium text-slate-200">{e.player}</span>
+                      <span className="text-sm font-bold text-indigo-400">{e.value} <span className="text-slate-500 font-normal text-xs">{unit}</span></span>
+                      <span className="text-xs text-slate-600">{e.date}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          );
+        })
+      )}
+      <button onClick={load} className="w-full py-2 rounded-lg text-xs text-slate-500 hover:text-slate-300 border border-slate-800 hover:border-slate-700 cursor-pointer transition-colors">↻ Refresh</button>
     </div>
   );
 }

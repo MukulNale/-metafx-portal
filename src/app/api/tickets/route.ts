@@ -1,25 +1,22 @@
 import { NextRequest, NextResponse } from "next/server";
-import { readFileSync, writeFileSync } from "fs";
-import { join } from "path";
+import { kvGet, kvSet } from "@/lib/kv";
 
-const FILE = join(process.cwd(), "src", "data", "tickets.json");
+const KEY = "mfx:tickets";
 
-function read() {
-  try { return JSON.parse(readFileSync(FILE, "utf8")); }
-  catch { return { tickets: [] }; }
-}
-function write(data: object) {
-  writeFileSync(FILE, JSON.stringify(data, null, 2) + "\n", "utf8");
+interface Ticket { id: string; [k: string]: unknown; }
+
+async function read(): Promise<{ tickets: Ticket[] }> {
+  return (await kvGet<{ tickets: Ticket[] }>(KEY)) ?? { tickets: [] };
 }
 
 export async function GET() {
-  return NextResponse.json(read());
+  return NextResponse.json(await read());
 }
 
 export async function POST(req: NextRequest) {
   const body = await req.json();
-  const data = read();
-  const ticket = {
+  const data = await read();
+  const ticket: Ticket = {
     id: `T-${String(data.tickets.length + 1).padStart(3, "0")}`,
     ...body,
     status: "open",
@@ -28,16 +25,16 @@ export async function POST(req: NextRequest) {
     notes: "",
   };
   data.tickets.unshift(ticket);
-  write(data);
+  await kvSet(KEY, data);
   return NextResponse.json(ticket, { status: 201 });
 }
 
 export async function PATCH(req: NextRequest) {
   const { id, ...updates } = await req.json();
-  const data = read();
-  const idx = data.tickets.findIndex((t: { id: string }) => t.id === id);
+  const data = await read();
+  const idx = data.tickets.findIndex(t => t.id === id);
   if (idx === -1) return NextResponse.json({ error: "not found" }, { status: 404 });
   data.tickets[idx] = { ...data.tickets[idx], ...updates, updatedAt: new Date().toISOString().split("T")[0] };
-  write(data);
+  await kvSet(KEY, data);
   return NextResponse.json(data.tickets[idx]);
 }

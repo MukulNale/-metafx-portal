@@ -1,73 +1,66 @@
 "use client";
-import { createContext, useContext, useState, useEffect, ReactNode, useCallback } from "react";
-import { PROJECTS as SEED, type Project, type SubTask } from "./projects";
+import { createContext, useContext, useState, useEffect, useCallback, ReactNode } from "react";
+import { type Project } from "./projects";
 
 interface Ctx {
   projects: Project[];
-  addProject: (p: Project) => void;
-  saveProject: (p: Project) => void;
-  deleteProject: (id: string) => void;
+  ready: boolean;
+  addProject: (p: Project) => Promise<void>;
+  saveProject: (p: Project) => Promise<void>;
+  deleteProject: (id: string) => Promise<void>;
 }
 
 const ProjectsCtx = createContext<Ctx | null>(null);
-const KEY    = "mfx_projects_v3";
-const OLD_KEY = "mfx_projects_v2";
 
-// Migrate a subtask from old shape (assignee: string) to new shape (assignees: string[])
-function migrateSubTask(s: SubTask & { assignee?: string }): SubTask {
-  if (Array.isArray(s.assignees)) return s;
-  const legacy = (s as unknown as { assignee?: string }).assignee ?? "";
-  const { assignee: _a, ...rest } = s as SubTask & { assignee?: string };
-  return { ...rest, assignees: legacy ? [legacy] : [] };
+async function apiFetch(): Promise<Project[]> {
+  const r = await fetch("/api/data/projects", { cache: "no-store" });
+  const { projects } = await r.json();
+  return projects ?? [];
 }
 
-function migrateProjects(raw: unknown[]): Project[] {
-  return (raw as Project[]).map(p => ({
-    ...p,
-    tasks: p.tasks.map(t => ({ ...t, subtasks: t.subtasks.map(migrateSubTask) })),
-  }));
+async function apiSave(projects: Project[]) {
+  await fetch("/api/data/projects", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ projects }),
+  });
 }
 
 export function ProjectsProvider({ children }: { children: ReactNode }) {
   const [projects, setProjects] = useState<Project[]>([]);
   const [ready, setReady] = useState(false);
 
+  const load = useCallback(async () => {
+    try {
+      const data = await apiFetch();
+      setProjects(data);
+    } catch {
+      // stay with current state if fetch fails
+    } finally {
+      setReady(true);
+    }
+  }, []);
+
   useEffect(() => {
-    // Try current key first
-    const raw = localStorage.getItem(KEY);
-    if (raw) {
-      try { setProjects(JSON.parse(raw)); setReady(true); return; } catch { /* fall through */ }
-    }
-    // Try migrating from v2
-    const old = localStorage.getItem(OLD_KEY);
-    if (old) {
-      try {
-        const migrated = migrateProjects(JSON.parse(old));
-        localStorage.setItem(KEY, JSON.stringify(migrated));
-        setProjects(migrated);
-        setReady(true);
-        return;
-      } catch { /* fall through */ }
-    }
-    // Seed
-    localStorage.setItem(KEY, JSON.stringify(SEED));
-    setProjects(SEED);
-    setReady(true);
+    load();
+    // Refresh every 20 seconds so teammates' changes show up
+    const interval = setInterval(load, 20_000);
+    // Also refresh when the tab comes back into focus
+    window.addEventListener("focus", load);
+    return () => { clearInterval(interval); window.removeEventListener("focus", load); };
+  }, [load]);
+
+  const persist = useCallback(async (next: Project[]) => {
+    setProjects(next);           // optimistic update
+    await apiSave(next);
   }, []);
 
-  const persist = useCallback((next: Project[]) => {
-    setProjects(next);
-    localStorage.setItem(KEY, JSON.stringify(next));
-  }, []);
-
-  const addProject    = useCallback((p: Project)  => persist([p, ...projects]),                          [persist, projects]);
-  const saveProject   = useCallback((p: Project)  => persist(projects.map(x => x.id === p.id ? p : x)), [persist, projects]);
-  const deleteProject = useCallback((id: string)  => persist(projects.filter(x => x.id !== id)),         [persist, projects]);
-
-  if (!ready) return null;
+  const addProject    = useCallback(async (p: Project)  => persist([p, ...projects]),                          [persist, projects]);
+  const saveProject   = useCallback(async (p: Project)  => persist(projects.map(x => x.id === p.id ? p : x)), [persist, projects]);
+  const deleteProject = useCallback(async (id: string)  => persist(projects.filter(x => x.id !== id)),         [persist, projects]);
 
   return (
-    <ProjectsCtx.Provider value={{ projects, addProject, saveProject, deleteProject }}>
+    <ProjectsCtx.Provider value={{ projects, ready, addProject, saveProject, deleteProject }}>
       {children}
     </ProjectsCtx.Provider>
   );
