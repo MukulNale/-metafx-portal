@@ -12,6 +12,7 @@ export default function Sidebar() {
     { href: "/dashboard",          label: "Dashboard", icon: <GridIcon /> },
     { href: "/dashboard/projects", label: "Projects",  icon: <ProjectIcon /> },
     { href: "/dashboard/tasks",    label: "Tasks",     icon: <TaskIcon /> },
+    { href: "/dashboard/tickets",   label: "Tickets",   icon: <TicketIcon /> },
     { href: "/dashboard/games",    label: "Games",     icon: <GameIcon /> },
     ...(user?.role === "admin" ? [{ href: "/dashboard/admin", label: "Admin", icon: <ShieldIcon /> }] : []),
   ];
@@ -63,4 +64,5 @@ function GridIcon()    { return <svg viewBox="0 0 20 20" fill="none" className="
 function ProjectIcon() { return <svg viewBox="0 0 20 20" fill="none" className="w-full h-full"><path d="M3 5a2 2 0 012-2h10a2 2 0 012 2v10a2 2 0 01-2 2H5a2 2 0 01-2-2V5z" stroke="currentColor" strokeWidth="1.5"/><path d="M7 9h6M7 12h4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg>; }
 function TaskIcon()    { return <svg viewBox="0 0 20 20" fill="none" className="w-full h-full"><path d="M4 6h12M4 10h8M4 14h5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg>; }
 function ShieldIcon()  { return <svg viewBox="0 0 20 20" fill="none" className="w-full h-full"><path d="M10 2l6 2.5v5c0 3.5-2.5 6.5-6 7.5-3.5-1-6-4-6-7.5v-5L10 2z" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round"/><path d="M7.5 10l2 2 3-3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>; }
+function TicketIcon()  { return <svg viewBox="0 0 20 20" fill="none" className="w-full h-full"><path d="M3 7a1 1 0 011-1h12a1 1 0 011 1v1.5a1.5 1.5 0 000 3V13a1 1 0 01-1 1H4a1 1 0 01-1-1v-1.5a1.5 1.5 0 000-3V7z" stroke="currentColor" strokeWidth="1.5"/><path d="M8 10h4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg>; }
 function GameIcon()    { return <svg viewBox="0 0 20 20" fill="none" className="w-full h-full"><rect x="2" y="6" width="16" height="10" rx="3" stroke="currentColor" strokeWidth="1.5"/><path d="M7 11h2M8 10v2" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/><circle cx="13" cy="10.5" r="0.75" fill="currentColor"/><circle cx="12" cy="12" r="0.75" fill="currentColor"/><path d="M6 4l1.5 2M14 4l-1.5 2" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg>; }
