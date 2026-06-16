@@ -2,7 +2,7 @@
 import AuthGuard from "@/components/AuthGuard";
 import Header from "@/components/layout/Header";
 import { USERS } from "@/lib/users";
-import { PROJECTS } from "@/lib/projects";
+import { useProjects } from "@/lib/projectsContext";
 
 const MEMBER_COLOR: Record<string, string> = {
   Mukul: "from-indigo-500 to-indigo-700", Suhas: "from-amber-500 to-amber-600",
@@ -10,7 +10,8 @@ const MEMBER_COLOR: Record<string, string> = {
 };
 
 export default function AdminPage() {
-  const allTasks = PROJECTS.flatMap(p => p.tasks.flatMap(t => t.subtasks));
+  const { projects } = useProjects();
+  const allTasks = projects.flatMap(p => p.tasks.flatMap(t => t.subtasks));
 
   return (
     <AuthGuard adminOnly>
@@ -67,7 +68,7 @@ export default function AdminPage() {
         <section>
           <h2 className="font-semibold text-slate-200 mb-3">Projects</h2>
           <div className="grid grid-cols-1 gap-3 max-w-2xl">
-            {PROJECTS.map(p => {
+            {projects.map(p => {
               const all  = p.tasks.flatMap(t => t.subtasks);
               const done = all.filter(t => t.status === "done").length;
               const pct  = all.length ? Math.round((done / all.length) * 100) : 0;

@@ -1,8 +1,9 @@
 "use client";
-import { use, useState, useRef } from "react";
+import { use, useState, useRef, useEffect } from "react";
 import AuthGuard from "@/components/AuthGuard";
 import Header from "@/components/layout/Header";
-import { PROJECTS, type SubTask, type Status, type Task } from "@/lib/projects";
+import { useProjects } from "@/lib/projectsContext";
+import { type SubTask, type Status, type Task, type Project } from "@/lib/projects";
 import { USERS } from "@/lib/users";
 
 const STATUS_OPTIONS: Status[] = ["todo", "in-progress", "review", "done"];
@@ -25,27 +26,53 @@ const MEMBER_COLOR: Record<string, string> = {
 
 const BLANK_TASK = { title: "", assignee: "", priority: "medium", due: "" };
 
+function deepClone<T>(v: T): T { return JSON.parse(JSON.stringify(v)); }
+
 export default function ProjectDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
-  const project = PROJECTS.find(p => p.id === id);
+  const { projects, saveProject } = useProjects();
 
-  const [, forceUpdate] = useState(0);
-  const refresh = () => forceUpdate(n => n + 1);
+  // Keep a local working copy; sync to context (→ localStorage) on every mutation
+  const [proj, setProj] = useState<Project | null>(null);
+
+  useEffect(() => {
+    const found = projects.find(p => p.id === id);
+    if (found) setProj(deepClone(found));
+  }, [id]); // intentionally only on mount — we own the state after that
+
+  const sectionInputRef = useRef<HTMLInputElement>(null);
 
   const [showAdd, setShowAdd]               = useState<string | null>(null);
   const [newTask, setNewTask]               = useState({ ...BLANK_TASK });
   const [editTask, setEditTask]             = useState<{ sectionId: string; task: SubTask } | null>(null);
   const [editingSection, setEditingSection] = useState<string | null>(null);
   const [sectionTitle, setSectionTitle]     = useState("");
-  const sectionInputRef                     = useRef<HTMLInputElement>(null);
-  const [editingProjectName, setEditingProjectName] = useState(false);
-  const [projectNameDraft, setProjectNameDraft]     = useState("");
+  const [editingName, setEditingName]       = useState(false);
+  const [nameDraft, setNameDraft]           = useState("");
+  const [editingDesc, setEditingDesc]       = useState(false);
+  const [descDraft, setDescDraft]           = useState("");
 
-  if (!project) return <div className="p-8 text-slate-400">Project not found.</div>;
+  if (!proj) return <div className="p-8 text-slate-400">Project not found.</div>;
 
-  const allSubtasks = project.tasks.flatMap(t => t.subtasks);
+  // Persist helper — update local state and push to context/localStorage
+  function update(next: Project) {
+    setProj(next);
+    saveProject(next);
+  }
+
+  const allSubtasks = proj.tasks.flatMap(t => t.subtasks);
   const done = allSubtasks.filter(t => t.status === "done").length;
   const pct  = allSubtasks.length ? Math.round((done / allSubtasks.length) * 100) : 0;
+
+  // ── Project name / description ──
+  function saveName() {
+    if (nameDraft.trim()) update({ ...proj, name: nameDraft.trim() });
+    setEditingName(false);
+  }
+  function saveDesc() {
+    update({ ...proj, description: descDraft.trim() });
+    setEditingDesc(false);
+  }
 
   // ── Section helpers ──
   function startEditSection(section: Task) {
@@ -54,19 +81,17 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
     setTimeout(() => sectionInputRef.current?.focus(), 50);
   }
   function saveSection(sectionId: string) {
-    const s = project!.tasks.find(t => t.id === sectionId);
-    if (s && sectionTitle.trim()) s.title = sectionTitle.trim();
+    if (!sectionTitle.trim()) { setEditingSection(null); return; }
+    update({ ...proj, tasks: proj.tasks.map(t => t.id === sectionId ? { ...t, title: sectionTitle.trim() } : t) });
     setEditingSection(null);
-    refresh();
   }
   function deleteSection(sectionId: string) {
-    project!.tasks = project!.tasks.filter(t => t.id !== sectionId);
-    refresh();
+    update({ ...proj, tasks: proj.tasks.filter(t => t.id !== sectionId) });
   }
   function addSection() {
     const newSection: Task = { id: `section-${Date.now()}`, title: "New Section", subtasks: [] };
-    project!.tasks.push(newSection);
-    refresh();
+    const next = { ...proj, tasks: [...proj.tasks, newSection] };
+    update(next);
     setTimeout(() => {
       setEditingSection(newSection.id);
       setSectionTitle(newSection.title);
@@ -75,64 +100,69 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
   }
 
   // ── Subtask helpers ──
+  function withSection(sectionId: string, fn: (tasks: SubTask[]) => SubTask[]): Project {
+    return { ...proj, tasks: proj.tasks.map(t => t.id === sectionId ? { ...t, subtasks: fn(t.subtasks) } : t) };
+  }
   function addTask(sectionId: string) {
     if (!newTask.title.trim() || !newTask.assignee) return;
-    const section = project!.tasks.find(t => t.id === sectionId);
-    if (!section) return;
-    section.subtasks.push({ id: `st-${Date.now()}`, title: newTask.title, assignee: newTask.assignee, status: "todo", priority: newTask.priority as "high"|"medium"|"low", due: newTask.due || undefined });
+    const sub: SubTask = { id: `st-${Date.now()}`, title: newTask.title, assignee: newTask.assignee, status: "todo", priority: newTask.priority as "high"|"medium"|"low", due: newTask.due || undefined };
+    update(withSection(sectionId, tasks => [...tasks, sub]));
     setNewTask({ ...BLANK_TASK });
     setShowAdd(null);
-    refresh();
   }
   function deleteTask(sectionId: string, taskId: string) {
-    const section = project!.tasks.find(t => t.id === sectionId);
-    if (!section) return;
-    section.subtasks = section.subtasks.filter(s => s.id !== taskId);
-    refresh();
+    update(withSection(sectionId, tasks => tasks.filter(s => s.id !== taskId)));
   }
   function saveEdit() {
     if (!editTask) return;
-    const section = project!.tasks.find(t => t.id === editTask.sectionId);
-    if (!section) return;
-    const idx = section.subtasks.findIndex(s => s.id === editTask.task.id);
-    if (idx !== -1) section.subtasks[idx] = { ...editTask.task };
+    update(withSection(editTask.sectionId, tasks => tasks.map(s => s.id === editTask.task.id ? { ...editTask.task } : s)));
     setEditTask(null);
-    refresh();
   }
   function cycleStatus(sectionId: string, sub: SubTask) {
-    const section = project!.tasks.find(t => t.id === sectionId);
-    if (!section) return;
-    const idx = section.subtasks.findIndex(s => s.id === sub.id);
-    if (idx === -1) return;
-    section.subtasks[idx].status = STATUS_OPTIONS[(STATUS_OPTIONS.indexOf(sub.status) + 1) % STATUS_OPTIONS.length];
-    refresh();
+    const next = STATUS_OPTIONS[(STATUS_OPTIONS.indexOf(sub.status) + 1) % STATUS_OPTIONS.length];
+    update(withSection(sectionId, tasks => tasks.map(s => s.id === sub.id ? { ...s, status: next } : s)));
   }
 
   return (
     <AuthGuard>
-      <Header title={project.name} />
+      <Header title={proj.name} />
       <div className="flex-1 overflow-y-auto scrollbar-thin p-6 space-y-5">
 
         {/* Project header */}
         <div className="bg-slate-900 border border-slate-800 rounded-xl p-5">
           <div className="flex items-start justify-between gap-4">
-            <div className="flex-1">
-              {editingProjectName ? (
-                <input autoFocus value={projectNameDraft}
-                  onChange={e => setProjectNameDraft(e.target.value)}
-                  onBlur={() => { if (projectNameDraft.trim()) project.name = projectNameDraft.trim(); setEditingProjectName(false); refresh(); }}
-                  onKeyDown={e => { if (e.key === "Enter") { if (projectNameDraft.trim()) project.name = projectNameDraft.trim(); setEditingProjectName(false); refresh(); } if (e.key === "Escape") setEditingProjectName(false); }}
-                  className="text-lg font-bold text-white bg-slate-800 border border-indigo-500 rounded-lg px-2 py-0.5 outline-none w-full max-w-xs" />
+            <div className="flex-1 min-w-0">
+              {/* Editable project name */}
+              {editingName ? (
+                <input autoFocus value={nameDraft} onChange={e => setNameDraft(e.target.value)}
+                  onBlur={saveName}
+                  onKeyDown={e => { if (e.key === "Enter") saveName(); if (e.key === "Escape") setEditingName(false); }}
+                  className="text-lg font-bold text-white bg-slate-800 border border-indigo-500 rounded-lg px-2 py-0.5 outline-none w-full max-w-xs mb-1" />
               ) : (
-                <div className="flex items-center gap-2 group">
-                  <h2 className="text-lg font-bold text-white">{project.name}</h2>
-                  <button onClick={() => { setProjectNameDraft(project.name); setEditingProjectName(true); }}
+                <div className="flex items-center gap-2 group mb-1">
+                  <h2 className="text-lg font-bold text-white">{proj.name}</h2>
+                  <button onClick={() => { setNameDraft(proj.name); setEditingName(true); }}
                     className="opacity-0 group-hover:opacity-100 p-1 rounded text-slate-600 hover:text-indigo-400 transition-opacity cursor-pointer">
                     <svg width="12" height="12" viewBox="0 0 20 20" fill="none"><path d="M14.5 3.5l2 2L6 16H4v-2L14.5 3.5z" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
                   </button>
                 </div>
               )}
-              <p className="text-sm text-slate-400 mt-1">{project.description}</p>
+              {/* Editable description */}
+              {editingDesc ? (
+                <textarea autoFocus value={descDraft} onChange={e => setDescDraft(e.target.value)}
+                  onBlur={saveDesc}
+                  onKeyDown={e => { if (e.key === "Escape") setEditingDesc(false); }}
+                  rows={2}
+                  className="w-full text-sm text-slate-300 bg-slate-800 border border-indigo-500 rounded-lg px-2 py-1 outline-none resize-none" />
+              ) : (
+                <div className="flex items-start gap-2 group">
+                  <p className="text-sm text-slate-400 flex-1">{proj.description || <span className="text-slate-600 italic">No description — click to add</span>}</p>
+                  <button onClick={() => { setDescDraft(proj.description); setEditingDesc(true); }}
+                    className="opacity-0 group-hover:opacity-100 p-1 rounded text-slate-600 hover:text-indigo-400 transition-opacity cursor-pointer flex-shrink-0 mt-0.5">
+                    <svg width="11" height="11" viewBox="0 0 20 20" fill="none"><path d="M14.5 3.5l2 2L6 16H4v-2L14.5 3.5z" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
+                  </button>
+                </div>
+              )}
             </div>
             <div className="text-right flex-shrink-0">
               <div className="text-2xl font-bold text-indigo-400">{pct}%</div>
@@ -145,14 +175,28 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
             </div>
           </div>
           <div className="flex gap-5 mt-3 text-xs text-slate-500">
-            <span>Lead: <span className="text-slate-300">{project.lead}</span></span>
+            <span>Lead: <span className="text-slate-300">{proj.lead}</span></span>
             <span>{allSubtasks.length} tasks · {done} done</span>
-            {project.dueDate && <span>Due {project.dueDate}</span>}
           </div>
         </div>
 
+        {/* Empty state */}
+        {proj.tasks.length === 0 && (
+          <div className="bg-slate-900 border border-dashed border-slate-700 rounded-xl py-14 text-center">
+            <div className="text-3xl mb-3">📋</div>
+            <div className="text-slate-400 font-medium mb-1">No sections yet</div>
+            <div className="text-slate-600 text-sm mb-4">Add a section to start organising tasks</div>
+            <button onClick={addSection}
+              className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium text-white cursor-pointer"
+              style={{ background: "linear-gradient(135deg,#6366f1,#4f46e5)" }}>
+              <svg width="13" height="13" viewBox="0 0 20 20" fill="none"><path d="M10 4v12M4 10h12" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg>
+              Add first section
+            </button>
+          </div>
+        )}
+
         {/* Sections */}
-        {project.tasks.map(section => (
+        {proj.tasks.map(section => (
           <div key={section.id} className="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden">
             <div className="flex items-center gap-2 px-5 py-3 border-b border-slate-800 bg-slate-800/50">
               {editingSection === section.id ? (
@@ -188,7 +232,8 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
               <div className="px-5 py-3 bg-indigo-500/5 border-b border-slate-800 flex flex-wrap gap-2 items-end">
                 <input value={newTask.title} onChange={e => setNewTask({...newTask, title: e.target.value})}
                   onKeyDown={e => e.key === "Enter" && addTask(section.id)}
-                  placeholder="Task title" className="flex-1 min-w-[180px] px-3 py-1.5 text-sm bg-slate-800 border border-slate-700 rounded-lg text-white placeholder:text-slate-600 outline-none focus:border-indigo-500" />
+                  autoFocus placeholder="Task title"
+                  className="flex-1 min-w-[180px] px-3 py-1.5 text-sm bg-slate-800 border border-slate-700 rounded-lg text-white placeholder:text-slate-600 outline-none focus:border-indigo-500" />
                 <select value={newTask.assignee} onChange={e => setNewTask({...newTask, assignee: e.target.value})}
                   className="px-3 py-1.5 text-sm bg-slate-800 border border-slate-700 rounded-lg text-white outline-none focus:border-indigo-500">
                   <option value="">Assign to…</option>
@@ -265,13 +310,16 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
           </div>
         ))}
 
-        <button onClick={addSection}
-          className="flex items-center gap-2 px-4 py-2.5 rounded-xl border border-dashed border-slate-700 text-sm text-slate-500 hover:text-slate-300 hover:border-slate-500 transition-colors w-full cursor-pointer">
-          <svg width="14" height="14" viewBox="0 0 20 20" fill="none"><path d="M10 4v12M4 10h12" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg>
-          Add section
-        </button>
+        {proj.tasks.length > 0 && (
+          <button onClick={addSection}
+            className="flex items-center gap-2 px-4 py-2.5 rounded-xl border border-dashed border-slate-700 text-sm text-slate-500 hover:text-slate-300 hover:border-slate-500 transition-colors w-full cursor-pointer">
+            <svg width="14" height="14" viewBox="0 0 20 20" fill="none"><path d="M10 4v12M4 10h12" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg>
+            Add section
+          </button>
+        )}
       </div>
 
+      {/* Edit Task Modal */}
       {editTask && (
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
           <div className="bg-slate-900 border border-slate-700 rounded-xl p-6 w-full max-w-md">

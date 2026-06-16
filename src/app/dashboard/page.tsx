@@ -1,13 +1,15 @@
 "use client";
 import AuthGuard from "@/components/AuthGuard";
 import Header from "@/components/layout/Header";
-import { PROJECTS, type SubTask } from "@/lib/projects";
+import { type SubTask } from "@/lib/projects";
 import { useAuth } from "@/lib/auth";
+import { useProjects } from "@/lib/projectsContext";
 import Link from "next/link";
 
 export default function DashboardPage() {
-  const proj = PROJECTS[0];
-  const allTasks = proj.tasks.flatMap(t => t.subtasks);
+  const { projects } = useProjects();
+  const proj = projects[0];
+  const allTasks = proj ? proj.tasks.flatMap(t => t.subtasks) : [];
   const done    = allTasks.filter(t => t.status === "done").length;
   const inProg  = allTasks.filter(t => t.status === "in-progress").length;
   const todo    = allTasks.filter(t => t.status === "todo").length;
@@ -27,7 +29,7 @@ export default function DashboardPage() {
           <StatCard label="Completed"    value={done}   color="text-green-400"  />
         </div>
 
-        <div className="bg-slate-900 border border-slate-800 rounded-xl p-5">
+        {proj && <div className="bg-slate-900 border border-slate-800 rounded-xl p-5">
           <div className="flex items-center justify-between mb-4">
             <div>
               <h2 className="font-semibold text-white text-base">{proj.name}</h2>
@@ -49,7 +51,7 @@ export default function DashboardPage() {
             <span>{inProg} in progress</span>
             <span>{todo} to do</span>
           </div>
-        </div>
+        </div>}
 
         <div className="bg-slate-900 border border-slate-800 rounded-xl p-5">
           <div className="flex items-center justify-between mb-3">

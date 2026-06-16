@@ -2,8 +2,9 @@
 import { useState } from "react";
 import AuthGuard from "@/components/AuthGuard";
 import Header from "@/components/layout/Header";
-import { PROJECTS, type Status } from "@/lib/projects";
+import { type Status } from "@/lib/projects";
 import { useAuth } from "@/lib/auth";
+import { useProjects } from "@/lib/projectsContext";
 
 const STATUS_STYLE: Record<Status, string> = {
   todo:          "bg-slate-700 text-slate-300",
@@ -23,10 +24,11 @@ const MEMBER_COLOR: Record<string, string> = {
 
 export default function TasksPage() {
   const { user } = useAuth();
+  const { projects } = useProjects();
   const [filter, setFilter] = useState<"all" | "mine">("mine");
   const [statusFilter, setStatusFilter] = useState<Status | "all">("all");
 
-  const allTasks = PROJECTS.flatMap(p =>
+  const allTasks = projects.flatMap(p =>
     p.tasks.flatMap(phase =>
       phase.subtasks.map(sub => ({ ...sub, project: p.name, phase: phase.title }))
     )
