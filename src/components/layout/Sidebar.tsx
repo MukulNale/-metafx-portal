@@ -18,9 +18,9 @@ export default function Sidebar() {
   function handleLogout() { logout(); router.push("/"); }
 
   return (
-    <aside className="w-[200px] flex-shrink-0 bg-white border-r border-slate-200 flex flex-col h-full">
-      <div className="px-5 py-4 border-b border-slate-200">
-        <span className="font-bold text-[17px] text-slate-800">Meta<span className="text-indigo-500">FX</span></span>
+    <aside className="w-[200px] flex-shrink-0 bg-slate-900 border-r border-slate-800 flex flex-col h-full">
+      <div className="px-5 py-4 border-b border-slate-800">
+        <span className="font-bold text-[17px] text-white">Meta<span className="text-indigo-400">FX</span></span>
       </div>
 
       <nav className="flex-1 py-3">
@@ -29,8 +29,8 @@ export default function Sidebar() {
           return (
             <Link key={href} href={href}
               className={`flex items-center gap-2.5 px-5 py-2.5 text-sm font-medium transition-colors relative
-                ${active ? "bg-indigo-50 text-indigo-600" : "text-slate-500 hover:bg-slate-50 hover:text-slate-700"}`}>
-              {active && <span className="absolute left-0 top-0 bottom-0 w-0.5 bg-indigo-500 rounded-r" />}
+                ${active ? "bg-indigo-500/20 text-indigo-400" : "text-slate-400 hover:bg-slate-800 hover:text-slate-200"}`}>
+              {active && <span className="absolute left-0 top-0 bottom-0 w-0.5 bg-indigo-400 rounded-r" />}
               <span className="w-4 h-4 flex-shrink-0">{icon}</span>
               {label}
             </Link>
@@ -38,19 +38,18 @@ export default function Sidebar() {
         })}
       </nav>
 
-      {/* User + logout */}
-      <div className="p-3 border-t border-slate-100">
+      <div className="p-3 border-t border-slate-800">
         <div className="flex items-center gap-2 px-2 py-2 mb-1">
           <div className={`w-7 h-7 rounded-full bg-gradient-to-br ${user?.color} flex items-center justify-center text-white text-[10px] font-bold flex-shrink-0`}>
             {user?.initials}
           </div>
           <div className="min-w-0 flex-1">
-            <div className="text-[12px] font-semibold text-slate-800 truncate">{user?.name}</div>
-            <div className="text-[10px] text-slate-400 capitalize">{user?.role}</div>
+            <div className="text-[12px] font-semibold text-slate-200 truncate">{user?.name}</div>
+            <div className="text-[10px] text-slate-500 capitalize">{user?.role}</div>
           </div>
         </div>
         <button onClick={handleLogout}
-          className="w-full flex items-center gap-2 px-2 py-1.5 text-[12px] text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors cursor-pointer">
+          className="w-full flex items-center gap-2 px-2 py-1.5 text-[12px] text-slate-500 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-colors cursor-pointer">
           <svg width="13" height="13" viewBox="0 0 20 20" fill="none"><path d="M7 3H4a1 1 0 00-1 1v12a1 1 0 001 1h3M13 14l4-4-4-4M17 10H7" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
           Sign out
         </button>

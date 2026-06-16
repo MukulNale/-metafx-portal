@@ -19,11 +19,11 @@ export default function AdminPage() {
 
         {/* Users */}
         <section>
-          <h2 className="font-semibold text-slate-800 mb-3">Team Members</h2>
-          <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
+          <h2 className="font-semibold text-slate-200 mb-3">Team Members</h2>
+          <div className="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden">
             <table className="w-full">
               <thead>
-                <tr className="text-[11px] text-slate-400 border-b border-slate-100 bg-slate-50">
+                <tr className="text-[11px] text-slate-600 border-b border-slate-800 bg-slate-800/50">
                   <th className="text-left px-5 py-3 font-medium">Name</th>
                   <th className="text-left px-3 py-3 font-medium">Username</th>
                   <th className="text-left px-3 py-3 font-medium">Password</th>
@@ -37,24 +37,24 @@ export default function AdminPage() {
                   const mine = allTasks.filter(t => t.assignee === u.name);
                   const done = mine.filter(t => t.status === "done").length;
                   return (
-                    <tr key={u.id} className="border-b border-slate-50 last:border-0 hover:bg-slate-50">
+                    <tr key={u.id} className="border-b border-slate-800/50 last:border-0 hover:bg-slate-800/30">
                       <td className="px-5 py-3">
                         <div className="flex items-center gap-2">
-                          <div className={`w-7 h-7 rounded-full bg-gradient-to-br ${MEMBER_COLOR[u.name] ?? "from-slate-400 to-slate-500"} flex items-center justify-center text-white text-[10px] font-bold`}>
+                          <div className={`w-7 h-7 rounded-full bg-gradient-to-br ${MEMBER_COLOR[u.name] ?? "from-slate-600 to-slate-700"} flex items-center justify-center text-white text-[10px] font-bold`}>
                             {u.initials}
                           </div>
-                          <span className="text-[13px] font-medium text-slate-800">{u.name}</span>
+                          <span className="text-[13px] font-medium text-slate-200">{u.name}</span>
                         </div>
                       </td>
-                      <td className="px-3 py-3 text-[13px] text-slate-500 font-mono">{u.username}</td>
-                      <td className="px-3 py-3 text-[13px] text-slate-500 font-mono">{u.password}</td>
+                      <td className="px-3 py-3 text-[13px] text-slate-400 font-mono">{u.username}</td>
+                      <td className="px-3 py-3 text-[13px] text-slate-400 font-mono">{u.password}</td>
                       <td className="px-3 py-3">
-                        <span className={`text-[11px] font-semibold px-2 py-0.5 rounded capitalize ${u.role === "admin" ? "bg-indigo-50 text-indigo-500" : "bg-slate-100 text-slate-500"}`}>
+                        <span className={`text-[11px] font-semibold px-2 py-0.5 rounded capitalize ${u.role === "admin" ? "bg-indigo-500/20 text-indigo-400" : "bg-slate-700 text-slate-300"}`}>
                           {u.role}
                         </span>
                       </td>
-                      <td className="px-3 py-3 text-[13px] text-slate-600">{mine.length}</td>
-                      <td className="px-3 py-3 text-[13px] text-green-600 font-medium">{done}</td>
+                      <td className="px-3 py-3 text-[13px] text-slate-400">{mine.length}</td>
+                      <td className="px-3 py-3 text-[13px] text-green-400 font-medium">{done}</td>
                     </tr>
                   );
                 })}
@@ -65,29 +65,26 @@ export default function AdminPage() {
 
         {/* Projects overview */}
         <section>
-          <h2 className="font-semibold text-slate-800 mb-3">Projects</h2>
+          <h2 className="font-semibold text-slate-200 mb-3">Projects</h2>
           <div className="grid grid-cols-1 gap-3 max-w-2xl">
             {PROJECTS.map(p => {
               const all  = p.tasks.flatMap(t => t.subtasks);
               const done = all.filter(t => t.status === "done").length;
               const pct  = all.length ? Math.round((done / all.length) * 100) : 0;
               return (
-                <div key={p.id} className="bg-white border border-slate-200 rounded-xl p-4">
+                <div key={p.id} className="bg-slate-900 border border-slate-800 rounded-xl p-4">
                   <div className="flex items-center justify-between mb-2">
-                    <span className="font-semibold text-slate-800">{p.name}</span>
-                    <span className="text-sm font-bold text-indigo-500">{pct}%</span>
+                    <span className="font-semibold text-slate-200">{p.name}</span>
+                    <span className="text-sm font-bold text-indigo-400">{pct}%</span>
                   </div>
-                  <div className="h-1.5 bg-slate-100 rounded-full overflow-hidden mb-2">
+                  <div className="h-1.5 bg-slate-800 rounded-full overflow-hidden mb-2">
                     <div className="h-full bg-indigo-500 rounded-full" style={{ width: `${pct}%` }} />
                   </div>
-                  <div className="text-xs text-slate-400">{all.length} tasks · {done} done · Lead: {p.lead}</div>
+                  <div className="text-xs text-slate-500">{all.length} tasks · {done} done · Lead: {p.lead}</div>
                 </div>
               );
             })}
           </div>
-          <p className="text-sm text-slate-400 mt-3">
-            To add a new project, edit <code className="text-indigo-500 text-xs bg-indigo-50 px-1 py-0.5 rounded">src/lib/projects.ts</code> and add an entry to the PROJECTS array.
-          </p>
         </section>
 
       </div>
