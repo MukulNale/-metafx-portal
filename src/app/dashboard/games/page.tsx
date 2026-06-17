@@ -3,17 +3,22 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import AuthGuard from "@/components/AuthGuard";
 import Header from "@/components/layout/Header";
 import { useAuth } from "@/lib/auth";
+import SubwayGame from "./SubwayGame";
+import GeoDashGame from "./GeoDashGame";
+import BasketballGame from "./BasketballGame";
+import StickmanHookGame from "./StickmanHookGame";
+import SlopeGame from "./SlopeGame";
 
 // ─── API helpers ──────────────────────────────────────────────────────────────
 type ScoreEntry = { player: string; value: number; date: string };
-type GameKey = "snake" | "flappy" | "mole";
+type GameKey = "snake" | "flappy" | "mole" | "subway" | "geoDash" | "basketball" | "stickman";
 type ScoreBoard = Record<GameKey, ScoreEntry[]>;
 
 async function addScore(game: GameKey, entry: ScoreEntry) {
   try { await fetch("/api/data/scores", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ game, entry }) }); } catch { /* silent */ }
 }
 async function fetchScores(): Promise<ScoreBoard> {
-  try { const r = await fetch("/api/data/scores", { cache: "no-store" }); return r.json(); } catch { return { snake: [], flappy: [], mole: [] }; }
+  try { const r = await fetch("/api/data/scores", { cache: "no-store" }); return r.json(); } catch { return { snake: [], flappy: [], mole: [], subway: [], geoDash: [], basketball: [], stickman: [] }; }
 }
 
 // ─── SNAKE ────────────────────────────────────────────────────────────────────
@@ -670,9 +675,13 @@ function Leaderboard() {
   const medals = ["🥇", "🥈", "🥉"];
 
   const sections: { key: GameKey; label: string; color: string }[] = [
-    { key: "snake", label: "🐍 Snake", color: "text-green-400" },
-    { key: "flappy", label: "🎬 Flappy Bird", color: "text-sky-400" },
-    { key: "mole", label: "🔨 Whack-a-Mole", color: "text-lime-400" },
+    { key: "snake",      label: "🐍 Snake",          color: "text-green-400" },
+    { key: "flappy",     label: "🎬 Flappy Bird",     color: "text-sky-400" },
+    { key: "mole",       label: "🔨 Whack-a-Mole",   color: "text-lime-400" },
+    { key: "geoDash",    label: "🟦 Geometry Dash",   color: "text-indigo-400" },
+    { key: "subway",     label: "🏃 Subway Run",      color: "text-violet-400" },
+    { key: "basketball", label: "🏀 Basketball",      color: "text-orange-400" },
+    { key: "stickman",   label: "🕹️ Stickman Hook",   color: "text-purple-400" },
   ];
 
   return (
@@ -716,14 +725,19 @@ function Leaderboard() {
 }
 
 // ─── PAGE ─────────────────────────────────────────────────────────────────────
-type Tab = "flappy" | "2048" | "mole" | "snake" | "leaderboard";
+type Tab = "flappy" | "2048" | "mole" | "snake" | "subway" | "geodash" | "basketball" | "stickman" | "slope" | "leaderboard";
 
 const TABS: { id: Tab; label: string; active: string; inactive: string }[] = [
-  { id: "flappy",      label: "🎬 Flappy",      active: "bg-sky-500/20 border-sky-500 text-sky-300",    inactive: "bg-slate-900 border-slate-800 text-slate-400 hover:text-slate-200 hover:border-slate-700" },
-  { id: "2048",        label: "🔢 2048",         active: "bg-orange-500/20 border-orange-500 text-orange-300", inactive: "bg-slate-900 border-slate-800 text-slate-400 hover:text-slate-200 hover:border-slate-700" },
-  { id: "mole",        label: "🔨 Whack-Mole",  active: "bg-lime-500/20 border-lime-500 text-lime-300", inactive: "bg-slate-900 border-slate-800 text-slate-400 hover:text-slate-200 hover:border-slate-700" },
-  { id: "snake",       label: "🐍 Snake",        active: "bg-green-500/20 border-green-500 text-green-300", inactive: "bg-slate-900 border-slate-800 text-slate-400 hover:text-slate-200 hover:border-slate-700" },
-  { id: "leaderboard", label: "🏆 Leaderboard", active: "bg-amber-500/20 border-amber-500 text-amber-300", inactive: "bg-slate-900 border-slate-800 text-slate-400 hover:text-slate-200 hover:border-slate-700" },
+  { id: "snake",       label: "🐍 Snake",        active: "bg-green-500/20 border-green-500 text-green-300",    inactive: "bg-slate-900 border-slate-800 text-slate-400 hover:text-slate-200 hover:border-slate-700" },
+  { id: "flappy",      label: "🎬 Flappy",        active: "bg-sky-500/20 border-sky-500 text-sky-300",          inactive: "bg-slate-900 border-slate-800 text-slate-400 hover:text-slate-200 hover:border-slate-700" },
+  { id: "2048",        label: "🔢 2048",           active: "bg-orange-500/20 border-orange-500 text-orange-300", inactive: "bg-slate-900 border-slate-800 text-slate-400 hover:text-slate-200 hover:border-slate-700" },
+  { id: "mole",        label: "🔨 Whack-Mole",    active: "bg-lime-500/20 border-lime-500 text-lime-300",       inactive: "bg-slate-900 border-slate-800 text-slate-400 hover:text-slate-200 hover:border-slate-700" },
+  { id: "slope",       label: "⚡ Slope",          active: "bg-cyan-500/20 border-cyan-500 text-cyan-300",       inactive: "bg-slate-900 border-slate-800 text-slate-400 hover:text-slate-200 hover:border-slate-700" },
+  { id: "geodash",     label: "🟦 Geo Dash",       active: "bg-indigo-500/20 border-indigo-500 text-indigo-300", inactive: "bg-slate-900 border-slate-800 text-slate-400 hover:text-slate-200 hover:border-slate-700" },
+  { id: "subway",      label: "🏃 Subway Run",     active: "bg-violet-500/20 border-violet-500 text-violet-300", inactive: "bg-slate-900 border-slate-800 text-slate-400 hover:text-slate-200 hover:border-slate-700" },
+  { id: "basketball",  label: "🏀 Basketball",     active: "bg-orange-500/20 border-orange-500 text-orange-300", inactive: "bg-slate-900 border-slate-800 text-slate-400 hover:text-slate-200 hover:border-slate-700" },
+  { id: "stickman",    label: "🕹️ Stickman Hook",  active: "bg-purple-500/20 border-purple-500 text-purple-300", inactive: "bg-slate-900 border-slate-800 text-slate-400 hover:text-slate-200 hover:border-slate-700" },
+  { id: "leaderboard", label: "🏆 Leaderboard",   active: "bg-amber-500/20 border-amber-500 text-amber-300",   inactive: "bg-slate-900 border-slate-800 text-slate-400 hover:text-slate-200 hover:border-slate-700" },
 ];
 
 export default function GamesPage() {
@@ -741,7 +755,7 @@ export default function GamesPage() {
             <h1 className="text-4xl font-black" style={{ background: "linear-gradient(135deg,#6366f1,#a855f7,#ec4899)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }}>
               🎮 MetaFX Arcade
             </h1>
-            <p className="text-slate-500 text-sm mt-1">Five games. Zero stakes. Pure fun.</p>
+            <p className="text-slate-500 text-sm mt-1">Nine games. Zero stakes. Pure fun.</p>
           </div>
 
           {/* Tabs */}
@@ -760,10 +774,15 @@ export default function GamesPage() {
           {/* Game card with gradient border */}
           <div className="p-px rounded-2xl" style={{ background: "linear-gradient(135deg,#6366f1,#a855f7,#ec4899)" }}>
             <div className="bg-slate-950 rounded-2xl p-8 flex flex-col items-center min-h-[400px] justify-center">
+              {active === "snake"       && <SnakeGame playerName={playerName} />}
               {active === "flappy"      && <FlappyGame playerName={playerName} />}
               {active === "2048"        && <Game2048 />}
               {active === "mole"        && <MoleGame playerName={playerName} />}
-              {active === "snake"       && <SnakeGame playerName={playerName} />}
+              {active === "slope"       && <SlopeGame playerName={playerName} onScore={(s) => addScore("geoDash", { player: playerName, value: s, date: new Date().toISOString().split("T")[0] })} />}
+              {active === "geodash"     && <GeoDashGame playerName={playerName} onScore={(s) => addScore("geoDash", { player: playerName, value: s, date: new Date().toISOString().split("T")[0] })} />}
+              {active === "subway"      && <SubwayGame playerName={playerName} onScore={(s) => addScore("subway", { player: playerName, value: s, date: new Date().toISOString().split("T")[0] })} />}
+              {active === "basketball"  && <BasketballGame playerName={playerName} onScore={(s) => addScore("basketball", { player: playerName, value: s, date: new Date().toISOString().split("T")[0] })} />}
+              {active === "stickman"    && <StickmanHookGame playerName={playerName} onScore={(s) => addScore("stickman", { player: playerName, value: s, date: new Date().toISOString().split("T")[0] })} />}
               {active === "leaderboard" && <Leaderboard />}
             </div>
           </div>

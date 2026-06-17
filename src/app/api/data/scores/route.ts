@@ -4,9 +4,9 @@ import { kvGet, kvSet } from "@/lib/kv";
 const KEY = "mfx:scores";
 
 type ScoreEntry = { player: string; value: number; date: string };
-type ScoreBoard = { snake: ScoreEntry[]; memory: ScoreEntry[]; wordle: ScoreEntry[]; trivia: ScoreEntry[] };
+type ScoreBoard = { snake: ScoreEntry[]; flappy: ScoreEntry[]; mole: ScoreEntry[]; subway: ScoreEntry[]; geoDash: ScoreEntry[]; basketball: ScoreEntry[]; stickman: ScoreEntry[]; memory: ScoreEntry[]; wordle: ScoreEntry[]; trivia: ScoreEntry[] };
 
-const empty = (): ScoreBoard => ({ snake: [], memory: [], wordle: [], trivia: [] });
+const empty = (): ScoreBoard => ({ snake: [], flappy: [], mole: [], subway: [], geoDash: [], basketball: [], stickman: [], memory: [], wordle: [], trivia: [] });
 
 export async function GET() {
   const scores = await kvGet<ScoreBoard>(KEY) ?? empty();
