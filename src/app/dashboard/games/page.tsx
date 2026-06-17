@@ -1,30 +1,68 @@
 "use client";
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback } from "react";
 import AuthGuard from "@/components/AuthGuard";
 import Header from "@/components/layout/Header";
 import { useAuth } from "@/lib/auth";
 
-// ─── Score API ────────────────────────────────────────────────────────────────
+// ─── Score + Balance API ──────────────────────────────────────────────────────
 type ScoreEntry = { player: string; value: number; date: string };
 type ScoreBoard = { snake: ScoreEntry[]; memory: ScoreEntry[]; wordle: ScoreEntry[]; trivia: ScoreEntry[] };
 
 async function addScore(game: keyof ScoreBoard, entry: ScoreEntry) {
-  try {
-    await fetch("/api/data/scores", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ game, entry }),
-    });
-  } catch { /* silent */ }
+  try { await fetch("/api/data/scores", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ game, entry }) }); } catch { /* silent */ }
+}
+async function fetchScores(): Promise<ScoreBoard> {
+  try { const r = await fetch("/api/data/scores", { cache: "no-store" }); return r.json(); }
+  catch { return { snake: [], memory: [], wordle: [], trivia: [] }; }
+}
+async function fetchBalance(player: string): Promise<number> {
+  try { const r = await fetch("/api/data/balances", { cache: "no-store" }); const b = await r.json(); return b[player] ?? 500; }
+  catch { return 500; }
+}
+async function updateBalance(player: string, delta: number): Promise<number> {
+  try { const r = await fetch("/api/data/balances", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ player, delta }) }); const d = await r.json(); return d.balance; }
+  catch { return 0; }
 }
 
-async function fetchScores(): Promise<ScoreBoard> {
-  try {
-    const r = await fetch("/api/data/scores", { cache: "no-store" });
-    return await r.json();
-  } catch {
-    return { snake: [], memory: [], wordle: [], trivia: [] };
-  }
+// ─── Shared betting UI ────────────────────────────────────────────────────────
+const BET_OPTIONS = [10, 25, 50, 100];
+function BetSelector({ balance, bet, setBet, onStart, label }: { balance: number; bet: number; setBet: (n: number) => void; onStart: () => void; label: string }) {
+  return (
+    <div className="flex flex-col items-center gap-5 w-full max-w-sm mx-auto">
+      <div className="w-full bg-slate-800 border border-slate-700 rounded-2xl p-5 text-center">
+        <div className="text-xs text-slate-500 mb-1">Your Balance</div>
+        <div className="text-3xl font-bold text-white">₹{balance.toLocaleString("en-IN")}</div>
+      </div>
+      <div className="w-full">
+        <div className="text-xs font-medium text-slate-400 mb-2">Choose your bet</div>
+        <div className="grid grid-cols-4 gap-2">
+          {BET_OPTIONS.map(b => (
+            <button key={b} onClick={() => setBet(b)} disabled={b > balance}
+              className={`py-2.5 rounded-xl text-sm font-bold cursor-pointer border transition-all disabled:opacity-30 disabled:cursor-not-allowed ${bet === b ? "bg-indigo-500/30 border-indigo-500 text-indigo-300" : "bg-slate-800 border-slate-700 text-slate-300 hover:border-slate-500"}`}>
+              ₹{b}
+            </button>
+          ))}
+        </div>
+      </div>
+      <button onClick={onStart} disabled={bet === 0 || bet > balance}
+        className="w-full py-3 rounded-xl text-white font-bold cursor-pointer disabled:opacity-40 text-sm"
+        style={{ background: "linear-gradient(135deg,#6366f1,#4f46e5)" }}>
+        {label} — Bet ₹{bet}
+      </button>
+    </div>
+  );
+}
+
+function WinLoseBanner({ won, profit, bet, onClose }: { won: boolean | "push"; profit: number; bet: number; onClose: () => void }) {
+  return (
+    <div className={`w-full rounded-2xl border p-5 text-center ${won === true ? "bg-green-500/10 border-green-500/30" : won === "push" ? "bg-slate-700/40 border-slate-600" : "bg-red-500/10 border-red-500/30"}`}>
+      <div className={`text-2xl font-bold mb-1 ${won === true ? "text-green-400" : won === "push" ? "text-slate-300" : "text-red-400"}`}>
+        {won === true ? `🎉 +₹${profit}` : won === "push" ? "🤝 Break even" : `😔 -₹${bet}`}
+      </div>
+      <div className="text-slate-400 text-sm mb-3">{won === true ? `You won ₹${profit} profit!` : won === "push" ? "Bet returned." : `Better luck next time.`}</div>
+      <button onClick={onClose} className="px-5 py-2 rounded-lg text-sm font-semibold text-white cursor-pointer" style={{ background: "linear-gradient(135deg,#6366f1,#4f46e5)" }}>Play Again</button>
+    </div>
+  );
 }
 
 // ─── Snake ────────────────────────────────────────────────────────────────────
@@ -32,11 +70,18 @@ const GRID = 20, TICK = 125;
 type Pt = { x: number; y: number };
 type Dir = "U" | "D" | "L" | "R";
 const OPP: Record<Dir, Dir> = { U: "D", D: "U", L: "R", R: "L" };
-const rnd = () => ({ x: Math.floor(Math.random() * GRID), y: Math.floor(Math.random() * GRID) });
 const ptEq = (a: Pt, b: Pt) => a.x === b.x && a.y === b.y;
 
+function safeFood(snake: Pt[]): Pt {
+  let pos: Pt;
+  do { pos = { x: Math.floor(Math.random() * GRID), y: Math.floor(Math.random() * GRID) }; }
+  while (snake.some(p => ptEq(p, pos)));
+  return pos;
+}
+
 function SnakeGame({ playerName }: { playerName: string }) {
-  const init = () => ({ snake: [{ x: 10, y: 10 }, { x: 9, y: 10 }, { x: 8, y: 10 }], food: rnd(), dir: "R" as Dir, pending: "R" as Dir, running: false, dead: false, score: 0 });
+  const initSnake = [{ x: 10, y: 10 }, { x: 9, y: 10 }, { x: 8, y: 10 }];
+  const init = () => ({ snake: initSnake, food: safeFood(initSnake), dir: "R" as Dir, pending: "R" as Dir, running: false, dead: false, score: 0 });
   const [g, setG] = useState(init);
 
   const tick = useCallback(() => {
@@ -48,7 +93,7 @@ function SnakeGame({ playerName }: { playerName: string }) {
       const newSnake = [next, ...prev.snake.slice(0, ate ? undefined : -1)];
       const dead = newSnake.slice(1).some(p => ptEq(p, next));
       if (dead) addScore("snake", { player: playerName, value: prev.score + (ate ? 1 : 0), date: new Date().toISOString().split("T")[0] });
-      return { ...prev, snake: newSnake, food: ate ? rnd() : prev.food, score: prev.score + (ate ? 1 : 0), dead, running: !dead, dir: d };
+      return { ...prev, snake: newSnake, food: ate ? safeFood(newSnake) : prev.food, score: prev.score + (ate ? 1 : 0), dead, running: !dead, dir: d };
     });
   }, [playerName]);
 
@@ -71,61 +116,104 @@ function SnakeGame({ playerName }: { playerName: string }) {
       </div>
       <div className="relative rounded-xl overflow-hidden border border-slate-700" style={{ width: SIZE, height: SIZE, background: "#0f172a" }}>
         <svg width={SIZE} height={SIZE} className="absolute inset-0 opacity-10">{Array.from({ length: GRID }, (_, y) => Array.from({ length: GRID }, (_, x) => <circle key={`${x}-${y}`} cx={x * CELL + CELL / 2} cy={y * CELL + CELL / 2} r="1" fill="#94a3b8" />))}</svg>
-        <div className="absolute rounded-full bg-red-400 shadow-[0_0_8px_2px_rgba(248,113,113,0.6)]" style={{ width: CELL - 4, height: CELL - 4, left: g.food.x * CELL + 2, top: g.food.y * CELL + 2 }} />
+        {/* Beer bottle food */}
+        <div className="absolute flex items-center justify-center" style={{ width: CELL, height: CELL, left: g.food.x * CELL, top: g.food.y * CELL, fontSize: CELL - 4, lineHeight: 1 }}>🍺</div>
         {g.snake.map((p, i) => <div key={i} className="absolute rounded-sm" style={{ width: CELL - 2, height: CELL - 2, left: p.x * CELL + 1, top: p.y * CELL + 1, background: i === 0 ? "#818cf8" : `rgba(99,102,241,${1 - i / g.snake.length * 0.7})`, boxShadow: i === 0 ? "0 0 6px 1px rgba(129,140,248,0.5)" : undefined }} />)}
         {!g.running && <div className="absolute inset-0 flex flex-col items-center justify-center bg-slate-950/70 rounded-xl">
-          {g.dead ? <><div className="text-2xl font-bold text-white mb-1">Game Over</div><div className="text-slate-400 text-sm mb-3">Score: {g.score}</div></> : <><div className="text-xl font-bold text-white mb-1">Snake</div><div className="text-slate-400 text-sm mb-3">Arrow keys or WASD</div></>}
+          {g.dead ? <><div className="text-2xl font-bold text-white mb-1">Game Over</div><div className="text-slate-400 text-sm mb-3">Score: {g.score}</div></> : <><div className="text-xl font-bold text-white mb-1">Snake 🐍</div><div className="text-slate-400 text-sm mb-3">Collect 🍺 · Arrow keys or WASD</div></>}
         </div>}
       </div>
-      <p className="text-xs text-slate-600">Arrow keys / WASD · score saves to leaderboard on death</p>
+      <p className="text-xs text-slate-600">Arrow keys / WASD · score saves on death</p>
     </div>
   );
 }
 
-// ─── Memory Match ─────────────────────────────────────────────────────────────
+// ─── Memory Match (Stake) ─────────────────────────────────────────────────────
 const EMOJIS = ["🎬", "🎭", "🎨", "🎵", "🌟", "🚀", "🦋", "🎯"];
 type Card = { id: number; emoji: string; flipped: boolean; matched: boolean };
 const shuffle = <T,>(a: T[]) => { const b = [...a]; for (let i = b.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [b[i], b[j]] = [b[j], b[i]]; } return b; };
 const makeCards = () => shuffle([...EMOJIS, ...EMOJIS].map((e, i) => ({ id: i, emoji: e, flipped: false, matched: false })));
 
-function MemoryGame({ playerName }: { playerName: string }) {
+// Payout: ≤10 moves → 3×bet profit | ≤15 → 2×bet | ≤20 → push | >20 → lose
+function memoryPayout(moves: number, bet: number): { won: boolean | "push"; profit: number } {
+  if (moves <= 10) return { won: true, profit: bet * 3 };
+  if (moves <= 15) return { won: true, profit: bet * 2 };
+  if (moves <= 20) return { won: "push", profit: 0 };
+  return { won: false, profit: 0 };
+}
+
+function MemoryGame({ playerName, balance, onBalanceChange }: { playerName: string; balance: number; onBalanceChange: (b: number) => void }) {
+  const [phase, setPhase] = useState<"bet" | "play" | "result">("bet");
+  const [bet, setBet] = useState(25);
   const [cards, setCards] = useState<Card[]>(makeCards);
-  const [picks, setPicks] = useState<number[]>([]);
   const [moves, setMoves] = useState(0);
   const [locked, setLocked] = useState(false);
-  const [won, setWon] = useState(false);
+  const [result, setResult] = useState<{ won: boolean | "push"; profit: number } | null>(null);
+
+  function startGame() {
+    setCards(makeCards()); setMoves(0); setLocked(false); setResult(null); setPhase("play");
+  }
+  async function finish(finalMoves: number) {
+    const r = memoryPayout(finalMoves, bet);
+    setResult(r);
+    addScore("memory", { player: playerName, value: finalMoves, date: new Date().toISOString().split("T")[0] });
+    const delta = r.won === true ? r.profit : r.won === "push" ? 0 : -bet;
+    const newBal = await updateBalance(playerName, delta);
+    onBalanceChange(newBal);
+    setPhase("result");
+  }
 
   function flip(id: number) {
-    if (locked) return;
+    if (locked || phase !== "play") return;
     setCards(prev => { const c = prev.find(c => c.id === id); if (!c || c.flipped || c.matched) return prev; return prev.map(x => x.id === id ? { ...x, flipped: true } : x); });
-    setPicks(prev => {
-      const next = [...prev, id];
-      if (next.length === 2) {
-        setMoves(m => m + 1); setLocked(true);
-        setTimeout(() => {
-          setCards(prev2 => {
-            const [a, b] = next.map(i => prev2.find(c => c.id === i)!);
-            const match = a.emoji === b.emoji;
-            const updated = prev2.map(c => next.includes(c.id) ? { ...c, matched: match, flipped: match } : c);
-            if (updated.every(c => c.matched)) { setTimeout(() => { setWon(true); addScore("memory", { player: playerName, value: moves + 1, date: new Date().toISOString().split("T")[0] }); }, 200); }
-            return updated;
-          });
-          setPicks([]); setLocked(false);
-        }, 900);
-        return next;
+    setCards(prev => {
+      const flipped = prev.filter(c => c.flipped && !c.matched);
+      if (flipped.length === 2) {
+        setMoves(m => {
+          const nm = m + 1;
+          setLocked(true);
+          setTimeout(() => {
+            setCards(prev2 => {
+              const [a, b] = flipped;
+              const match = a.emoji === b.emoji;
+              const updated = prev2.map(c => [a.id, b.id].includes(c.id) ? { ...c, matched: match, flipped: match } : c);
+              if (updated.every(c => c.matched)) setTimeout(() => finish(nm), 300);
+              return updated;
+            });
+            setLocked(false);
+          }, 900);
+          return nm;
+        });
       }
-      return next;
+      return prev;
     });
   }
-  function reset() { setCards(makeCards()); setPicks([]); setMoves(0); setLocked(false); setWon(false); }
+
+  if (phase === "bet") return (
+    <div className="w-full flex flex-col items-center gap-4">
+      <div className="text-center mb-1">
+        <div className="text-lg font-bold text-white mb-1">🃏 Memory Match</div>
+        <div className="text-xs text-slate-500">≤10 moves → 3× · ≤15 → 2× · ≤20 → push · else lose</div>
+      </div>
+      <BetSelector balance={balance} bet={bet} setBet={setBet} onStart={startGame} label="Play Memory" />
+    </div>
+  );
+
+  if (phase === "result") return (
+    <div className="flex flex-col items-center gap-4 w-full max-w-sm mx-auto">
+      <div className="text-sm text-slate-400">Completed in <span className="text-white font-bold">{moves} moves</span></div>
+      <WinLoseBanner won={result!.won} profit={result!.profit} bet={bet} onClose={() => setPhase("bet")} />
+    </div>
+  );
 
   return (
     <div className="flex flex-col items-center gap-4">
       <div className="flex items-center gap-6">
         <div className="text-sm text-slate-400">Moves: <span className="font-bold text-white text-lg">{moves}</span></div>
+        <div className="text-sm text-slate-400">Bet: <span className="font-bold text-amber-400">₹{bet}</span></div>
         <div className="text-sm text-slate-400">Matched: <span className="font-bold text-green-400">{cards.filter(c => c.matched).length / 2}/{EMOJIS.length}</span></div>
-        <button onClick={reset} className="px-4 py-1.5 rounded-lg text-sm font-medium text-white cursor-pointer" style={{ background: "linear-gradient(135deg,#6366f1,#4f46e5)" }}>New game</button>
       </div>
+      <div className="text-xs text-slate-600">≤10 moves → 3× · ≤15 → 2× · ≤20 → push</div>
       <div className="grid grid-cols-4 gap-3">
         {cards.map(card => (
           <button key={card.id} onClick={() => flip(card.id)}
@@ -134,179 +222,154 @@ function MemoryGame({ playerName }: { playerName: string }) {
           </button>
         ))}
       </div>
-      {won && <div className="px-5 py-3 rounded-xl bg-green-500/10 border border-green-500/30 text-center"><div className="text-green-400 font-bold">You won! 🎉</div><div className="text-slate-400 text-sm">{moves} moves · saved to leaderboard</div></div>}
     </div>
   );
 }
 
-// ─── Wordle ───────────────────────────────────────────────────────────────────
+// ─── Wordle (Stake) ───────────────────────────────────────────────────────────
 const WORDS = ["SCENE", "LIGHT", "FRAME", "SHOOT", "DRAFT", "SOUND", "SCORE", "STORY", "ACTOR", "STAGE", "DANCE", "TEMPO", "LYRIC", "PITCH", "BEATS", "AUDIO", "PRINT", "FOCUS", "ANGLE", "PAINT", "BRUSH", "MOVIE", "PIXEL", "BLOOM", "TRACK", "CABLE", "PRISM", "BOKEH", "CRANE", "SLATE"];
 const pickWord = () => WORDS[Math.floor(Math.random() * WORDS.length)];
-type TileState = "empty" | "typing" | "correct" | "present" | "absent";
 const MAX_HINTS = 3;
 
-function WordleGame({ playerName }: { playerName: string }) {
+// Payout: 1-2 guesses → 4× | 3-4 → 2× | 5-6 → push | fail → lose
+function wordlePayout(guesses: number, solved: boolean, bet: number): { won: boolean | "push"; profit: number } {
+  if (!solved) return { won: false, profit: 0 };
+  if (guesses <= 2) return { won: true, profit: bet * 4 };
+  if (guesses <= 4) return { won: true, profit: bet * 2 };
+  return { won: "push", profit: 0 };
+}
+
+function WordleGame({ playerName, balance, onBalanceChange }: { playerName: string; balance: number; onBalanceChange: (b: number) => void }) {
+  const [phase, setPhase] = useState<"bet" | "play" | "result">("bet");
+  const [bet, setBet] = useState(25);
   const [target, setTarget] = useState(pickWord);
   const [guesses, setGuesses] = useState<string[]>([]);
   const [current, setCurrent] = useState("");
   const [done, setDone] = useState<"win" | "lose" | null>(null);
   const [shake, setShake] = useState(false);
-  // hints: set of position indices already revealed
   const [hintedPositions, setHintedPositions] = useState<Set<number>>(new Set());
   const [hintsUsed, setHintsUsed] = useState(0);
+  const [result, setResult] = useState<{ won: boolean | "push"; profit: number } | null>(null);
   const MAX = 6;
 
+  async function finishGame(solved: boolean, numGuesses: number) {
+    const r = wordlePayout(numGuesses, solved, bet);
+    setResult(r);
+    addScore("wordle", { player: playerName, value: solved ? numGuesses : 99, date: new Date().toISOString().split("T")[0] });
+    const delta = r.won === true ? r.profit : r.won === "push" ? 0 : -bet;
+    const newBal = await updateBalance(playerName, delta);
+    onBalanceChange(newBal);
+    setPhase("result");
+  }
+
   const submitGuess = useCallback((guess: string) => {
-    if (guess.length !== 5) { setShake(true); setTimeout(() => setShake(false), 500); return; }
+    if (done || guess.length !== 5) { setShake(true); setTimeout(() => setShake(false), 500); return; }
     const next = [...guesses, guess];
     setGuesses(next);
-    if (guess === target) {
-      setDone("win");
-      addScore("wordle", { player: playerName, value: next.length, date: new Date().toISOString().split("T")[0] });
-    } else if (next.length >= MAX) {
-      setDone("lose");
-    }
+    const solved = guess === target;
+    if (solved) { setDone("win"); setTimeout(() => finishGame(true, next.length), 600); }
+    else if (next.length >= MAX) { setDone("lose"); setTimeout(() => finishGame(false, next.length), 600); }
     setCurrent("");
-  }, [guesses, target, playerName]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [guesses, target, done, bet]);
 
   useEffect(() => {
+    if (phase !== "play") return;
     const onKey = (e: KeyboardEvent) => {
       if (done) return;
       const k = e.key.toUpperCase();
-      if (k === "ENTER") { submitGuess(current); }
-      else if (k === "BACKSPACE") { setCurrent(p => p.slice(0, -1)); }
-      else if (/^[A-Z]$/.test(k) && current.length < 5) { setCurrent(p => p + k); }
+      if (k === "ENTER") submitGuess(current);
+      else if (k === "BACKSPACE") setCurrent(p => p.slice(0, -1));
+      else if (/^[A-Z]$/.test(k) && current.length < 5) setCurrent(p => p + k);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [current, done, submitGuess]);
+  }, [current, done, submitGuess, phase]);
+
+  function startGame() {
+    setTarget(pickWord()); setGuesses([]); setCurrent(""); setDone(null);
+    setHintedPositions(new Set()); setHintsUsed(0); setResult(null); setPhase("play");
+  }
 
   function useHint() {
     if (done || hintsUsed >= MAX_HINTS) return;
-    // Find positions not yet correctly guessed and not already hinted
     const revealed = new Set<number>(hintedPositions);
-    // Mark positions already correctly guessed in any guess
-    for (const g of guesses) {
-      for (let i = 0; i < 5; i++) if (g[i] === target[i]) revealed.add(i);
-    }
-    // Also mark positions already in current hint set
-    for (const p of hintedPositions) revealed.add(p);
-    // Pick a random un-revealed position
+    for (const g of guesses) for (let i = 0; i < 5; i++) if (g[i] === target[i]) revealed.add(i);
     const candidates = [0, 1, 2, 3, 4].filter(i => !revealed.has(i));
-    if (candidates.length === 0) return;
+    if (!candidates.length) return;
     const pick = candidates[Math.floor(Math.random() * candidates.length)];
     setHintedPositions(prev => new Set([...prev, pick]));
     setHintsUsed(h => h + 1);
   }
 
-  function reset() { setTarget(pickWord()); setGuesses([]); setCurrent(""); setDone(null); setHintedPositions(new Set()); setHintsUsed(0); }
-
   function tileStyle(row: number, col: number): { bg: string; border: string } {
     if (row < guesses.length) {
-      const g = guesses[row], t = target;
-      const targetArr = t.split("");
-      const state = Array(5).fill("absent");
+      const g = guesses[row], t = target, targetArr = t.split(""), state = Array(5).fill("absent");
       for (let i = 0; i < 5; i++) if (g[i] === t[i]) { state[i] = "correct"; targetArr[i] = "_"; }
-      for (let i = 0; i < 5; i++) {
-        if (state[i] === "correct") continue;
-        const idx = targetArr.indexOf(g[i]);
-        if (idx !== -1) { state[i] = "present"; targetArr[idx] = "_"; }
-      }
-      const s = state[col] as TileState;
+      for (let i = 0; i < 5; i++) { if (state[i] === "correct") continue; const idx = targetArr.indexOf(g[i]); if (idx !== -1) { state[i] = "present"; targetArr[idx] = "_"; } }
+      const s = state[col];
       return { bg: s === "correct" ? "#22c55e" : s === "present" ? "#eab308" : "#334155", border: "transparent" };
     }
-    if (row === guesses.length) {
-      const letter = current[col];
-      return { bg: "transparent", border: letter ? "#6366f1" : "#334155" };
-    }
+    if (row === guesses.length) return { bg: "transparent", border: current[col] ? "#6366f1" : "#334155" };
     return { bg: "transparent", border: "#1e293b" };
   }
 
-  // keyboard letter states
   const letterState: Record<string, string> = {};
   for (const g of guesses) {
-    const targetArr = target.split("");
-    const state = Array(5).fill("absent");
+    const targetArr = target.split(""), state = Array(5).fill("absent");
     for (let i = 0; i < 5; i++) if (g[i] === target[i]) { state[i] = "correct"; targetArr[i] = "_"; }
-    for (let i = 0; i < 5; i++) {
-      if (state[i] === "correct") continue;
-      const idx = targetArr.indexOf(g[i]);
-      if (idx !== -1) { state[i] = "present"; targetArr[idx] = "_"; }
-    }
-    for (let i = 0; i < 5; i++) {
-      const prev = letterState[g[i]];
-      if (prev === "correct") continue;
-      if (state[i] === "correct" || (!prev && state[i] === "present") || (!prev && state[i] === "absent")) letterState[g[i]] = state[i];
-    }
+    for (let i = 0; i < 5; i++) { if (state[i] === "correct") continue; const idx = targetArr.indexOf(g[i]); if (idx !== -1) { state[i] = "present"; targetArr[idx] = "_"; } }
+    for (let i = 0; i < 5; i++) { const prev = letterState[g[i]]; if (prev === "correct") continue; if (state[i] === "correct" || (!prev && state[i] === "present") || (!prev && state[i] === "absent")) letterState[g[i]] = state[i]; }
   }
   const kbColor = (l: string) => ({ correct: "bg-green-600 text-white", present: "bg-yellow-500 text-white", absent: "bg-slate-700 text-slate-400" })[letterState[l] ?? ""] ?? "bg-slate-700 text-slate-300";
   const ROWS = ["QWERTYUIOP", "ASDFGHJKL", "ZXCVBNM"];
 
-  // All correctly-guessed positions across all guesses + hinted positions
-  const revealedByGuesses = new Set<number>();
-  for (const g of guesses) for (let i = 0; i < 5; i++) if (g[i] === target[i]) revealedByGuesses.add(i);
+  if (phase === "bet") return (
+    <div className="w-full flex flex-col items-center gap-4">
+      <div className="text-center mb-1">
+        <div className="text-lg font-bold text-white mb-1">📝 Wordle</div>
+        <div className="text-xs text-slate-500">1-2 guesses → 4× · 3-4 → 2× · 5-6 → push · miss → lose</div>
+      </div>
+      <BetSelector balance={balance} bet={bet} setBet={setBet} onStart={startGame} label="Play Wordle" />
+    </div>
+  );
+
+  if (phase === "result") return (
+    <div className="flex flex-col items-center gap-4 w-full max-w-sm mx-auto">
+      <div className="text-sm text-slate-400">{done === "win" ? `Solved in ${guesses.length} guesses` : `Word was: ${target}`}</div>
+      <WinLoseBanner won={result!.won} profit={result!.profit} bet={bet} onClose={() => setPhase("bet")} />
+    </div>
+  );
 
   return (
-    <div className="flex flex-col items-center gap-5">
+    <div className="flex flex-col items-center gap-4">
       <div className="flex items-center gap-3 flex-wrap justify-center">
-        <span className="text-sm text-slate-400">Guess the 5-letter word · {MAX} tries</span>
-        {!done && (
-          <button onClick={useHint} disabled={hintsUsed >= MAX_HINTS}
-            className={`px-3 py-1 rounded-lg text-xs font-medium transition-colors cursor-pointer border ${hintsUsed >= MAX_HINTS ? "bg-slate-800/40 border-slate-700 text-slate-600 cursor-not-allowed" : "bg-amber-500/10 border-amber-500/30 text-amber-400 hover:bg-amber-500/20"}`}>
-            💡 Hint ({MAX_HINTS - hintsUsed} left)
-          </button>
-        )}
-        <button onClick={reset} className="px-3 py-1 rounded-lg text-xs font-medium text-white cursor-pointer" style={{ background: "linear-gradient(135deg,#6366f1,#4f46e5)" }}>New word</button>
+        <span className="text-sm text-slate-400">Bet: <span className="font-bold text-amber-400">₹{bet}</span></span>
+        <span className="text-xs text-slate-600">1-2→4× · 3-4→2× · 5-6→push</span>
+        {!done && <button onClick={useHint} disabled={hintsUsed >= MAX_HINTS}
+          className={`px-3 py-1 rounded-lg text-xs font-medium transition-colors cursor-pointer border ${hintsUsed >= MAX_HINTS ? "bg-slate-800/40 border-slate-700 text-slate-600 cursor-not-allowed" : "bg-amber-500/10 border-amber-500/30 text-amber-400 hover:bg-amber-500/20"}`}>
+          💡 Hint ({MAX_HINTS - hintsUsed} left)
+        </button>}
       </div>
-
-      {/* Grid */}
-      <div className={`grid gap-1.5 ${shake ? "animate-[shake_0.4s_ease]" : ""}`} style={{ gridTemplateRows: `repeat(${MAX},1fr)` }}>
+      <div className={`grid gap-1.5 ${shake ? "animate-[shake_0.4s_ease]" : ""}`}>
         {Array.from({ length: MAX }, (_, row) => (
           <div key={row} className="flex gap-1.5">
             {Array.from({ length: 5 }, (_, col) => {
               const { bg, border } = tileStyle(row, col);
               const isCurrentRow = row === guesses.length;
-              const letter = row < guesses.length
-                ? guesses[row][col]
-                : isCurrentRow
-                  ? current[col] ?? (hintedPositions.has(col) ? target[col] : "")
-                  : "";
-              // show hint letter dimly if no current input at that position
-              const isHintLetter = isCurrentRow && hintedPositions.has(col) && !current[col];
-              return (
-                <div key={col} className="w-12 h-12 rounded-lg flex items-center justify-center text-xl font-bold transition-all duration-300"
-                  style={{
-                    background: isHintLetter ? "rgba(234,179,8,0.15)" : bg,
-                    border: `2px solid ${isHintLetter ? "#eab308" : border}`,
-                    color: isHintLetter ? "#fbbf24" : "white",
-                  }}>
-                  {letter}
-                </div>
-              );
+              const letter = row < guesses.length ? guesses[row][col] : isCurrentRow ? current[col] ?? (hintedPositions.has(col) ? target[col] : "") : "";
+              const isHint = isCurrentRow && hintedPositions.has(col) && !current[col];
+              return <div key={col} className="w-12 h-12 rounded-lg flex items-center justify-center text-xl font-bold transition-all duration-300"
+                style={{ background: isHint ? "rgba(234,179,8,0.15)" : bg, border: `2px solid ${isHint ? "#eab308" : border}`, color: isHint ? "#fbbf24" : "white" }}>{letter}</div>;
             })}
           </div>
         ))}
       </div>
-
-      {/* Result */}
-      {done && (
-        <div className={`px-5 py-3 rounded-xl border text-center ${done === "win" ? "bg-green-500/10 border-green-500/30" : "bg-red-500/10 border-red-500/30"}`}>
-          <div className={`font-bold ${done === "win" ? "text-green-400" : "text-red-400"}`}>{done === "win" ? `🎉 Solved in ${guesses.length}!` : `😔 The word was ${target}`}</div>
-          {done === "win" && <div className="text-slate-400 text-sm">Saved to leaderboard</div>}
-        </div>
-      )}
-
-      {/* Keyboard */}
       <div className="flex flex-col items-center gap-1.5 mt-1">
         {ROWS.map(row => (
           <div key={row} className="flex gap-1">
-            {row.split("").map(l => (
-              <button key={l} onClick={() => { if (!done && current.length < 5) setCurrent(p => p + l); }}
-                className={`w-8 h-9 rounded text-[11px] font-bold cursor-pointer transition-colors ${kbColor(l)}`}>{l}</button>
-            ))}
-            {row === "ZXCVBNM" && (
-              <button onClick={() => { if (!done) setCurrent(p => p.slice(0, -1)); }} className="px-2 h-9 rounded text-[11px] font-bold cursor-pointer bg-slate-700 text-slate-300 hover:bg-slate-600 ml-1">⌫</button>
-            )}
+            {row.split("").map(l => <button key={l} onClick={() => { if (!done && current.length < 5) setCurrent(p => p + l); }} className={`w-8 h-9 rounded text-[11px] font-bold cursor-pointer transition-colors ${kbColor(l)}`}>{l}</button>)}
+            {row === "ZXCVBNM" && <button onClick={() => { if (!done) setCurrent(p => p.slice(0, -1)); }} className="px-2 h-9 rounded text-[11px] font-bold cursor-pointer bg-slate-700 text-slate-300 hover:bg-slate-600 ml-1">⌫</button>}
           </div>
         ))}
         <button onClick={() => submitGuess(current)} className="mt-1 px-8 h-9 rounded text-xs font-bold cursor-pointer bg-slate-700 text-slate-300 hover:bg-slate-600">ENTER</button>
@@ -316,7 +379,7 @@ function WordleGame({ playerName }: { playerName: string }) {
   );
 }
 
-// ─── Trivia ───────────────────────────────────────────────────────────────────
+// ─── Trivia (Stake) ───────────────────────────────────────────────────────────
 const QUESTIONS = [
   { q: "What does 'fps' stand for in filmmaking?",        opts: ["Frames Per Second","Focal Point System","Film Processing Speed","Focus Pull Shot"], ans: 0 },
   { q: "Who directed '2001: A Space Odyssey'?",           opts: ["James Cameron","Stanley Kubrick","Ridley Scott","Steven Spielberg"],                  ans: 1 },
@@ -334,95 +397,101 @@ const QUESTIONS = [
   { q: "The golden ratio is approximately:",              opts: ["2.718","3.141","1.618","1.414"],                                                         ans: 2 },
   { q: "What does 'IP' mean in the film industry?",       opts: ["Image Processing","Intellectual Property","Incremental Production","Integrated Pipeline"], ans: 1 },
 ];
+function pickQuestions(n = 8) { return [...QUESTIONS].sort(() => Math.random() - 0.5).slice(0, n); }
 
-function pickQuestions(n = 8) {
-  return [...QUESTIONS].sort(() => Math.random() - 0.5).slice(0, n);
+// Payout: 100% → 3× | ≥75% → 2× | ≥50% → push | <50% → lose
+function triviaPayout(score: number, total: number, bet: number): { won: boolean | "push"; profit: number } {
+  const pct = score / total;
+  if (pct >= 1)    return { won: true, profit: bet * 3 };
+  if (pct >= 0.75) return { won: true, profit: bet * 2 };
+  if (pct >= 0.5)  return { won: "push", profit: 0 };
+  return { won: false, profit: 0 };
 }
 
-type TriviaPhase = "setup" | "p1" | "p2" | "result";
+type TriviaPhase = "bet" | "setup" | "p1" | "p2" | "result";
 
-function TriviaGame({ playerName }: { playerName: string }) {
+function TriviaGame({ playerName, balance, onBalanceChange }: { playerName: string; balance: number; onBalanceChange: (b: number) => void }) {
+  const [phase, setPhase] = useState<TriviaPhase>("bet");
+  const [bet, setBet] = useState(25);
   const [p2Name, setP2Name] = useState("");
-  const [phase, setPhase] = useState<TriviaPhase>("setup");
   const [questions, setQuestions] = useState(() => pickQuestions(8));
   const [qIndex, setQIndex] = useState(0);
   const [p1Answers, setP1Answers] = useState<number[]>([]);
   const [p2Answers, setP2Answers] = useState<number[]>([]);
   const [selected, setSelected] = useState<number | null>(null);
   const [revealed, setRevealed] = useState(false);
+  const [result, setResult] = useState<{ won: boolean | "push"; profit: number } | null>(null);
 
+  function startSetup() { setPhase("setup"); }
   function startGame() {
     const qs = pickQuestions(8);
     setQuestions(qs); setQIndex(0); setP1Answers([]); setP2Answers([]); setSelected(null); setRevealed(false); setPhase("p1");
   }
-  function reset() { setPhase("setup"); setP2Name(""); setP1Answers([]); setP2Answers([]); }
 
-  function pick(i: number) {
+  async function pick(i: number) {
     if (revealed || selected !== null) return;
     setSelected(i); setRevealed(true);
-    setTimeout(() => {
+    setTimeout(async () => {
       const answers = phase === "p1" ? p1Answers : p2Answers;
       const nextAnswers = [...answers, i];
       if (phase === "p1") setP1Answers(nextAnswers);
       else setP2Answers(nextAnswers);
 
       if (qIndex + 1 >= questions.length) {
-        if (phase === "p1") {
-          setPhase("p2"); setQIndex(0); setSelected(null); setRevealed(false);
-        } else {
+        if (phase === "p1") { setPhase("p2"); setQIndex(0); setSelected(null); setRevealed(false); }
+        else {
           const s1 = nextAnswers.filter((a, j) => a === questions[j].ans).length;
           const s2 = [...p2Answers, i].filter((a, j) => a === questions[j].ans).length;
           addScore("trivia", { player: playerName, value: s1, date: new Date().toISOString().split("T")[0] });
           if (p2Name) addScore("trivia", { player: p2Name, value: s2, date: new Date().toISOString().split("T")[0] });
+          const r = triviaPayout(s1, questions.length, bet);
+          setResult(r);
+          const delta = r.won === true ? r.profit : r.won === "push" ? 0 : -bet;
+          const newBal = await updateBalance(playerName, delta);
+          onBalanceChange(newBal);
           setPhase("result");
         }
-      } else {
-        setQIndex(q => q + 1); setSelected(null); setRevealed(false);
-      }
+      } else { setQIndex(q => q + 1); setSelected(null); setRevealed(false); }
     }, 900);
   }
 
   const p1Score = p1Answers.filter((a, i) => a === questions[i].ans).length;
   const p2Score = p2Answers.filter((a, i) => a === questions[i].ans).length;
-  const currentPlayer = phase === "p1" ? playerName : (p2Name || "Player 2");
   const q = questions[qIndex];
+  const currentPlayer = phase === "p1" ? playerName : (p2Name || "Player 2");
+
+  if (phase === "bet") return (
+    <div className="w-full flex flex-col items-center gap-4">
+      <div className="text-center mb-1">
+        <div className="text-lg font-bold text-white mb-1">🎯 Trivia Battle</div>
+        <div className="text-xs text-slate-500">100% → 3× · ≥75% → 2× · ≥50% → push · else lose</div>
+      </div>
+      <BetSelector balance={balance} bet={bet} setBet={setBet} onStart={startSetup} label="Continue to Setup" />
+    </div>
+  );
 
   if (phase === "setup") return (
     <div className="flex flex-col items-center gap-5 max-w-sm mx-auto">
-      <div className="text-center"><div className="text-3xl mb-2">🎯</div><div className="font-bold text-white text-lg">Trivia Battle</div><div className="text-slate-400 text-sm mt-1">2-player pass-and-play · 8 questions each</div></div>
+      <div className="text-center"><div className="text-3xl mb-2">🎯</div><div className="font-bold text-white text-lg">Trivia Battle</div><div className="text-slate-400 text-sm mt-1">2-player pass-and-play · 8 questions · Bet ₹{bet}</div></div>
       <div className="w-full"><label className="block text-xs font-medium text-slate-400 mb-1">Player 2 name (optional)</label><input value={p2Name} onChange={e => setP2Name(e.target.value)} placeholder="Enter teammate's name…" className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-lg text-sm text-white placeholder:text-slate-600 outline-none focus:border-indigo-500" /></div>
       <button onClick={startGame} className="w-full py-2.5 rounded-xl text-white font-semibold cursor-pointer" style={{ background: "linear-gradient(135deg,#6366f1,#4f46e5)" }}>Start — {playerName} goes first</button>
     </div>
   );
 
   if (phase === "result") {
-    const winner = p1Score > p2Score ? playerName : p1Score < p2Score ? (p2Name || "Player 2") : null;
+    const winner = p1Score > p2Score ? playerName : p1Score < p2Score ? (p2Name || "P2") : null;
     return (
-      <div className="flex flex-col items-center gap-5 max-w-sm mx-auto">
-        <div className="text-center"><div className="text-3xl mb-2">{winner ? "🏆" : "🤝"}</div><div className="font-bold text-white text-lg">{winner ? `${winner} wins!` : "It's a tie!"}</div></div>
+      <div className="flex flex-col items-center gap-4 max-w-sm mx-auto w-full">
         <div className="flex gap-4 w-full">
           {[{ name: playerName, score: p1Score }, { name: p2Name || "Player 2", score: p2Score }].map(({ name, score }) => (
             <div key={name} className={`flex-1 rounded-xl p-4 text-center border ${score === Math.max(p1Score, p2Score) && p1Score !== p2Score ? "bg-indigo-500/20 border-indigo-500/40" : "bg-slate-800 border-slate-700"}`}>
               <div className="text-slate-400 text-sm mb-1">{name}</div>
-              <div className="text-3xl font-bold text-white">{score}</div>
-              <div className="text-slate-500 text-xs">/ {questions.length}</div>
+              <div className="text-3xl font-bold text-white">{score}/{questions.length}</div>
             </div>
           ))}
         </div>
-        <div className="w-full space-y-2">
-          {questions.map((question, i) => (
-            <div key={i} className="flex gap-2 items-start text-xs bg-slate-800/50 rounded-lg px-3 py-2">
-              <span className="text-slate-500 flex-shrink-0 pt-0.5">{i + 1}.</span>
-              <div className="flex-1 min-w-0"><div className="text-slate-300 mb-0.5 truncate">{question.q}</div>
-                <div className="flex gap-3 text-[11px]">
-                  <span className={p1Answers[i] === question.ans ? "text-green-400" : "text-red-400"}>{playerName}: {question.opts[p1Answers[i]]}</span>
-                  {p2Name && <span className={p2Answers[i] === question.ans ? "text-green-400" : "text-red-400"}>{p2Name}: {question.opts[p2Answers[i]]}</span>}
-                </div>
-              </div>
-            </div>
-          ))}
-        </div>
-        <button onClick={reset} className="px-6 py-2 rounded-lg text-sm font-medium text-white cursor-pointer" style={{ background: "linear-gradient(135deg,#6366f1,#4f46e5)" }}>Play again</button>
+        <div className="text-sm text-slate-400 text-center">{winner ? `${winner} wins!` : "Tie game!"}</div>
+        <WinLoseBanner won={result!.won} profit={result!.profit} bet={bet} onClose={() => setPhase("bet")} />
       </div>
     );
   }
@@ -430,17 +499,12 @@ function TriviaGame({ playerName }: { playerName: string }) {
   return (
     <div className="flex flex-col items-center gap-5 max-w-sm mx-auto w-full">
       <div className="w-full flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <div className={`w-2 h-2 rounded-full ${phase === "p1" ? "bg-indigo-400" : "bg-amber-400"}`} />
-          <span className="text-sm font-semibold text-white">{currentPlayer}&apos;s turn</span>
-        </div>
-        <span className="text-xs text-slate-500">Q{qIndex + 1} / {questions.length}</span>
+        <div className="flex items-center gap-2"><div className={`w-2 h-2 rounded-full ${phase === "p1" ? "bg-indigo-400" : "bg-amber-400"}`} /><span className="text-sm font-semibold text-white">{currentPlayer}&apos;s turn</span></div>
+        <div className="flex items-center gap-3"><span className="text-xs text-amber-400 font-semibold">Bet ₹{bet}</span><span className="text-xs text-slate-500">Q{qIndex + 1}/{questions.length}</span></div>
       </div>
-      <div className="w-full bg-slate-800/50 rounded-full h-1.5"><div className="bg-indigo-500 h-1.5 rounded-full transition-all" style={{ width: `${((qIndex) / questions.length) * 100}%` }} /></div>
+      <div className="w-full bg-slate-800/50 rounded-full h-1.5"><div className="bg-indigo-500 h-1.5 rounded-full transition-all" style={{ width: `${(qIndex / questions.length) * 100}%` }} /></div>
       {phase === "p2" && qIndex === 0 && <div className="w-full bg-amber-500/10 border border-amber-500/30 rounded-xl p-3 text-center text-sm text-amber-400">Pass the device to <strong>{p2Name || "Player 2"}</strong> 🤝</div>}
-      <div className="w-full bg-slate-800 rounded-2xl p-5">
-        <p className="text-white font-semibold text-base leading-relaxed">{q.q}</p>
-      </div>
+      <div className="w-full bg-slate-800 rounded-2xl p-5"><p className="text-white font-semibold text-base leading-relaxed">{q.q}</p></div>
       <div className="w-full grid grid-cols-1 gap-2">
         {q.opts.map((opt, i) => {
           let style = "bg-slate-800 border-slate-700 text-slate-200 hover:border-indigo-500/50 hover:bg-slate-700";
@@ -449,12 +513,7 @@ function TriviaGame({ playerName }: { playerName: string }) {
             else if (i === selected) style = "bg-red-500/20 border-red-500/50 text-red-300";
             else style = "bg-slate-800 border-slate-700 text-slate-500";
           } else if (selected === i) style = "bg-indigo-500/20 border-indigo-500 text-indigo-300";
-          return (
-            <button key={i} onClick={() => pick(i)} disabled={revealed}
-              className={`w-full text-left px-4 py-3 rounded-xl border text-sm font-medium transition-all cursor-pointer ${style}`}>
-              <span className="text-slate-500 mr-2">{String.fromCharCode(65 + i)}.</span>{opt}
-            </button>
-          );
+          return <button key={i} onClick={() => pick(i)} disabled={revealed} className={`w-full text-left px-4 py-3 rounded-xl border text-sm font-medium transition-all cursor-pointer ${style}`}><span className="text-slate-500 mr-2">{String.fromCharCode(65 + i)}.</span>{opt}</button>;
         })}
       </div>
     </div>
@@ -466,11 +525,7 @@ function Leaderboard() {
   const [scores, setScores] = useState<ScoreBoard>({ snake: [], memory: [], wordle: [], trivia: [] });
   const [loading, setLoading] = useState(true);
 
-  async function load() {
-    setLoading(true);
-    setScores(await fetchScores());
-    setLoading(false);
-  }
+  async function load() { setLoading(true); setScores(await fetchScores()); setLoading(false); }
   useEffect(() => { load(); }, []);
 
   const medals = ["🥇", "🥈", "🥉"];
@@ -484,32 +539,26 @@ function Leaderboard() {
   return (
     <div className="w-full max-w-xl mx-auto space-y-5">
       <div className="text-center mb-2"><div className="text-2xl mb-1">🏆</div><div className="font-bold text-white">Leaderboard</div><div className="text-xs text-slate-500 mt-0.5">Shared across all team members</div></div>
-      {loading ? (
-        <div className="text-center text-slate-500 text-sm py-8">Loading scores…</div>
-      ) : (
-        GAMES.map(({ key, label, unit, lowBetter }) => {
-          const list = scores[key] ?? [];
-          return (
-            <div key={key} className="bg-slate-800/50 border border-slate-700 rounded-xl overflow-hidden">
-              <div className="px-4 py-2.5 bg-slate-800 border-b border-slate-700"><span className="font-semibold text-slate-200 text-sm">{label}</span>{lowBetter && <span className="text-[10px] text-slate-500 ml-2">lower is better</span>}</div>
-              {list.length === 0 ? (
-                <div className="px-4 py-4 text-center text-slate-600 text-xs">No scores yet — play a game!</div>
-              ) : (
-                <div className="divide-y divide-slate-700/50">
-                  {list.slice(0, 5).map((e, i) => (
-                    <div key={i} className="flex items-center gap-3 px-4 py-2.5">
-                      <span className="text-sm w-5 text-center">{medals[i] ?? <span className="text-slate-500 text-xs">{i + 1}</span>}</span>
-                      <span className="flex-1 text-sm font-medium text-slate-200">{e.player}</span>
-                      <span className="text-sm font-bold text-indigo-400">{e.value} <span className="text-slate-500 font-normal text-xs">{unit}</span></span>
-                      <span className="text-xs text-slate-600">{e.date}</span>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          );
-        })
-      )}
+      {loading ? <div className="text-center text-slate-500 text-sm py-8">Loading…</div> : GAMES.map(({ key, label, unit, lowBetter }) => {
+        const list = (scores[key] ?? []).filter(e => e.value !== 99);
+        return (
+          <div key={key} className="bg-slate-800/50 border border-slate-700 rounded-xl overflow-hidden">
+            <div className="px-4 py-2.5 bg-slate-800 border-b border-slate-700"><span className="font-semibold text-slate-200 text-sm">{label}</span>{lowBetter && <span className="text-[10px] text-slate-500 ml-2">lower is better</span>}</div>
+            {list.length === 0 ? <div className="px-4 py-4 text-center text-slate-600 text-xs">No scores yet</div> : (
+              <div className="divide-y divide-slate-700/50">
+                {list.slice(0, 5).map((e, i) => (
+                  <div key={i} className="flex items-center gap-3 px-4 py-2.5">
+                    <span className="text-sm w-5 text-center">{medals[i] ?? <span className="text-slate-500 text-xs">{i + 1}</span>}</span>
+                    <span className="flex-1 text-sm font-medium text-slate-200">{e.player}</span>
+                    <span className="text-sm font-bold text-indigo-400">{e.value} <span className="text-slate-500 font-normal text-xs">{unit}</span></span>
+                    <span className="text-xs text-slate-600">{e.date}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        );
+      })}
       <button onClick={load} className="w-full py-2 rounded-lg text-xs text-slate-500 hover:text-slate-300 border border-slate-800 hover:border-slate-700 cursor-pointer transition-colors">↻ Refresh</button>
     </div>
   );
@@ -521,34 +570,48 @@ const TABS: { id: Tab; label: string }[] = [
   { id: "snake",       label: "🐍 Snake"        },
   { id: "memory",      label: "🃏 Memory"        },
   { id: "wordle",      label: "📝 Wordle"        },
-  { id: "trivia",      label: "🎯 Trivia Battle" },
+  { id: "trivia",      label: "🎯 Trivia"        },
   { id: "leaderboard", label: "🏆 Leaderboard"   },
 ];
 
 export default function GamesPage() {
   const { user } = useAuth();
   const [active, setActive] = useState<Tab>("snake");
+  const [balance, setBalance] = useState<number | null>(null);
   const playerName = user?.name ?? "Player";
+
+  useEffect(() => {
+    fetchBalance(playerName).then(setBalance);
+  }, [playerName]);
+
+  const onBalanceChange = (b: number) => setBalance(b);
 
   return (
     <AuthGuard>
       <Header title="Games" />
       <div className="flex-1 overflow-y-auto scrollbar-thin p-6">
         <div className="max-w-2xl mx-auto">
+          {/* Balance bar */}
+          {balance !== null && (
+            <div className="mb-5 flex items-center justify-between bg-slate-900 border border-slate-800 rounded-xl px-5 py-3">
+              <span className="text-sm text-slate-400">💰 Demo Balance</span>
+              <span className="text-lg font-bold text-white">₹{balance.toLocaleString("en-IN")}</span>
+            </div>
+          )}
+
           <div className="flex gap-1.5 mb-7 flex-wrap">
             {TABS.map(t => (
               <button key={t.id} onClick={() => setActive(t.id)}
-                className={`px-4 py-2 rounded-xl text-sm font-semibold transition-all cursor-pointer border
-                  ${active === t.id ? "bg-indigo-500/20 border-indigo-500/50 text-indigo-300" : "bg-slate-900 border-slate-800 text-slate-400 hover:text-slate-200 hover:border-slate-700"}`}>
+                className={`px-4 py-2 rounded-xl text-sm font-semibold transition-all cursor-pointer border ${active === t.id ? "bg-indigo-500/20 border-indigo-500/50 text-indigo-300" : "bg-slate-900 border-slate-800 text-slate-400 hover:text-slate-200 hover:border-slate-700"}`}>
                 {t.label}
               </button>
             ))}
           </div>
           <div className="bg-slate-900 border border-slate-800 rounded-2xl p-8 flex flex-col items-center">
             {active === "snake"       && <SnakeGame  playerName={playerName} />}
-            {active === "memory"      && <MemoryGame playerName={playerName} />}
-            {active === "wordle"      && <WordleGame playerName={playerName} />}
-            {active === "trivia"      && <TriviaGame playerName={playerName} />}
+            {active === "memory"      && balance !== null && <MemoryGame playerName={playerName} balance={balance} onBalanceChange={onBalanceChange} />}
+            {active === "wordle"      && balance !== null && <WordleGame playerName={playerName} balance={balance} onBalanceChange={onBalanceChange} />}
+            {active === "trivia"      && balance !== null && <TriviaGame playerName={playerName} balance={balance} onBalanceChange={onBalanceChange} />}
             {active === "leaderboard" && <Leaderboard />}
           </div>
         </div>
